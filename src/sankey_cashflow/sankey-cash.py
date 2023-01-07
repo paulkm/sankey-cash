@@ -1134,6 +1134,33 @@ class DataRow:
         return None
 
 
+class TransactionRow:
+  def __init__(self, df, key):
+    self.key = key
+    self.data = {}
+    for col in DataRow.fields:
+      val = df.at[key, col]
+      if is_null(val) and DataRow.fields[col]["required"]:
+        raise Exception(f"Required column {col} was null for {repr(df[key])}")
+      self.data[col] = val
+
+  class TransactionDate:
+    def __init__(self, value):
+      self._required = True
+      self._nullable = True
+      self._datatype = timestamps.Timestamp
+      self._coerce_type = True  # TODO: switch to a function that coerces. Or just use getters and setters.
+      self._comment = ""
+      self._value = pd.to_datetime(value)
+
+    @property
+    def value(self):
+      return self._value
+
+    @value.setter
+    def value(self, val):
+      self._value = pd.to_datetime(val)
+
 # Define some helper functions ==============================================================================================
 
 def is_null(obj):
