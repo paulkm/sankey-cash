@@ -37,14 +37,15 @@ from pandas._libs.tslibs import timestamps, nattype
 # TODO: make tag/store overrides as source with previous category assignments preserved [done, except as targets]
 # TODO: prevent multiple s-tags
 
-# Define some classes =======================================================================================================
+# Define some classes =================================================================================================
+
 
 class AppSettings:
     """
       Application settings and defaults + validation, getters/setters, etc
     """
-
     def __init__(self, args):
+        self.DEFAULT_START_DATE = pd.to_datetime("10/1/2022")
         self.data_source = args.source
         self.data_sheet = args.sheet or "current_exp"
         self._labels_source = args.srcmap or "Sources-Targets"
@@ -53,7 +54,7 @@ class AppSettings:
         self.verbose = args.verbose
         self._g_creds = args.creds or './google_service_account_key.json'
         self.distribute_amounts = args.distributions
-        self.include_future = args.include_future
+        self.all_time = args.all_time
         self.recurring = args.recurring
         self.base_title = "Cashflow"
         self._date_filter_start = None
@@ -160,16 +161,14 @@ class RowLabels:
       Data looks like: [{'Category Name': 'House', 'Type': 'computed', 'Source': 'Income', 'Target': 'House', 'Link color': 'rgba(153, 187, 255, 0.8)', 'Node color': 'rgba(102, 153, 255, 1)', 'Comments': '', '': ''}]
       Also creates a DAG with source target edges based on labels definitions
     """
-
     def __init__(self, labeldata):
         self._labeldata = labeldata
         self._digraph = nx.DiGraph()
         self._digraph.add_node("Income", ntype="income")
-        self.process_report = f"RowLabel report\n{'=' * 60}\n\n\n"
+        self.process_report = f"RowLabel report\n{'='*60}\n\n\n"
         required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Link color', 'Node color']
         if False in [k in self._labeldata[0].keys() for k in required_columns]:
-            raise Exception(
-                f"Sources-Targets sheet does not have all required columns! Needed: {required_columns}. Found: {list(self._labeldata[0].keys())}")
+            raise Exception(f"Sources-Targets sheet does not have all required columns! Needed: {required_columns}. Found: {list(self._labeldata[0].keys())}")
         self._available_attributes = ['source', 'target', 'link_color', 'node_color', 'type']
         # TODO: validation
         self._lookup = {}
@@ -182,9 +181,7 @@ class RowLabels:
                 raise Exception(f"Duplicate label! {i['Category Name']}")
             # Add to internal lookup dict
             self.process_report += f"ADDING LOOKUP: {i}\n"
-            self._lookup[i['Category Name']] = {'source': i.get('Source'), 'target': i.get('Target'),
-                                                'link_color': i.get('Link color'), 'node_color': i.get('Node color'),
-                                                'type': i.get('Type')}
+            self._lookup[i['Category Name']] = {'source': i.get('Source'), 'target': i.get('Target'), 'link_color': i.get('Link color'), 'node_color': i.get('Node color'), 'type': i.get('Type')}
             if i.get("Source") == "DEDUCTIONS":
                 # These have to be dynamically generated - skip adding to DAG for now (or maybe entirely)
                 # TODO (maybe): switch to using type and/or DAG attributes
@@ -209,8 +206,7 @@ class RowLabels:
                     self._digraph.add_edge(i.get('Source'), i.get('Target'))
             else:
                 self.process_report += f"ERROR (SKIPPING): {i}\n"
-                print(
-                    f"Category: {i['Category Name']} yielded an empty source and/or target! {i.get('Source')}:{i.get('Target')}")
+                print(f"Category: {i['Category Name']} yielded an empty source and/or target! {i.get('Source')}:{i.get('Target')}")
 
     @property
     def data(self):
@@ -287,7 +283,7 @@ class RowLabels:
         plt.tight_layout()
         nx.draw_networkx(self._digraph, arrows=True)
         # plt.figure(figsize=(20,20))
-        plt.savefig(filename, dpi=200, format="PNG")
+        plt.savefig(filename,dpi=200,format="PNG")
         plt.clf()
 
 
@@ -295,13 +291,11 @@ class Transactions:
     """
       Contains transaction data and all helper methods for transforming and outputing.
       init with a Pandas dataframe from Google Sheets or a csv. NOTE: depending on the activity, dataframes are mutable.
-
       TODO:
         empty values from CSV are 'NaN'
         Make sure various synthetic entries don't cause problems for other computations
         Make sure that various methods can be run in any order, or enforce precedence/locking
     """
-
     def __init__(self, dataframe, labels_obj, app_settings_obj):
         self._df = dataframe
         self._grouped_df = None
@@ -314,18 +308,18 @@ class Transactions:
         # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
             print(f"Converting data in {self.length} fetched rows to datetimes...")
-        self._df["Date"] = pd.to_datetime(self._df["Date"])  # Does not mutate dataframe
+        self._df["Date"] = pd.to_datetime(self._df["Date"]) # Does not mutate dataframe
         if nattype.NaTType in [type(i) for i in self._df["Date"]]:
             raise Exception("Empty date found!")  # There is probably a better way to do this.
         self.earliest_date = self._df["Date"].sort_values().iloc[0]  # Returns pandas._libs.tslibs.timestamps.Timestamp
-        self.latest_date = self._df["Date"].sort_values().iloc[len(self._df) - 1]
+        self.latest_date = self._df["Date"].sort_values().iloc[len(self._df)-1]
         self.default_date = self.latest_date - datetime.timedelta(days=1)
         self.max_depth = 1
         self.tips_processed = False
         self.sales_tax_processed = False
         self.surplus_deficit_processed = False
         self.amount_distributions = False
-        self.process_report = f"Transactions report\n{'=' * 60}\n\n\n"
+        self.process_report = f"Transactions report\n{'='*60}\n\n\n"
 
     def _validate_df(self):
         # Validate header row
@@ -345,18 +339,17 @@ class Transactions:
         """
 
         dt_today = datetime.datetime.today()
-        self.process_report += f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}\n{'-' * 60}\n"
+        self.process_report += f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}\n{'-'*60}\n"
         if self._app_settings.verbose:
             print(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
 
         # Step 1:
         if self._app_settings.exclude_tags:
-            self.process_report += f"Checking for tags to exclude: {self._app_settings.exclude_tags}\n{'-' * 60}\n"
+            self.process_report += f"Checking for tags to exclude: {self._app_settings.exclude_tags}\n{'-'*60}\n"
             df_changed = False
             rows_to_drop = []
-            for k, v in enumerate(self._df["Tags"]):
-                tag_matches = DataRow.tag_matches(v,
-                                                  self._app_settings.exclude_tags)  # None if either arg is None or if no matches
+            for k,v in enumerate(self._df["Tags"]):
+                tag_matches = DataRow.tag_matches(v, self._app_settings.exclude_tags)  # None if either arg is None or if no matches
                 if tag_matches:
                     df_changed = True
                     rows_to_drop.append(self._df.index[k])
@@ -381,15 +374,17 @@ class Transactions:
                 raise Exception("Filter dates flag was True, but no dates were passed in!")
             start_date = date_range[0]
             end_date = date_range[1]
-            if end_date is None and not self._app_settings.include_future:
+            if end_date is None and not self._app_settings.all_time:
                 end_date = dt_today
-            self.process_report += f"Filtering for dates from {start_date} to {end_date}\n{'-' * 60}\n"
+            if start_date is None and not self._app_settings.all_time:
+                start_date = self._app_settings.DEFAULT_START_DATE
+            self.process_report += f"Filtering for dates from {start_date} to {end_date}\n{'-'*60}\n"
             if self._app_settings.verbose:
                 print(f"Filtering for dates from {start_date} to {end_date}")
             # TODO: test and find edge cases!
             self.filter_dates(start_date, end_date)
-        elif not self._app_settings.include_future:
-            self.filter_dates(None, dt_today)
+        elif not self._app_settings.all_time:
+            self.filter_dates(self._app_settings.DEFAULT_START_DATE, dt_today)
 
         self.update_title()
         # Step 4:
@@ -463,11 +458,11 @@ class Transactions:
             if data_override_s_t:
                 this_obj.process_report += f"[{this_step_id}] Override source/target for {this_category_val} from transaction data -> {src}:{tgt}\n"
 
-            return src, tgt
+            return src,tgt
 
         # MAIN LOOP ........................................................................................
 
-        for k, v in enumerate(self._df["Category"]):
+        for k,v in enumerate(self._df["Category"]):
             # Main labeling loop. Iterate over each transaction, look up source-target information in labels spreadsheet applying/overriding as indicated.
             this_step_id = str(uuid4())[:8]
             self.process_report += f"[{this_step_id}] START Processing {self._df.at[k, 'Date']} | {v} | {self._df.at[k, 'Tags']} | ${self._df.at[k, 'Amount']}\n"
@@ -511,8 +506,7 @@ class Transactions:
 
                 # Check for tag match(es)
                 # Note currently we will only ever use the first match.
-                tag_matches = DataRow.tag_matches(self._df.at[k, "Tags"],
-                                                  self._app_settings.tags)  # None if flag is not enabled or no matches
+                tag_matches = DataRow.tag_matches(self._df.at[k, "Tags"], self._app_settings.tags)  # None if flag is not enabled or no matches
                 tag_type = None
                 if tag_matches:
                     if self._app_settings.recurring and tag_matches and tag_matches[0] == "Recurring":
@@ -533,14 +527,11 @@ class Transactions:
                             # NOTE: if tag is distant from "Income", we'll need to handle it while reconciling DAG
                     elif self._app_settings.tag_override:
                         # If overriding tags, we'll use the labels sheet to determine placement
-                        this_source = self._labels_obj.get_attribute(tag_matches[0], "source", labeltype="tag",
-                                                                     use_default=False)
-                        this_target = self._labels_obj.get_attribute(tag_matches[0], "target", labeltype="tag",
-                                                                     use_default=False)
+                        this_source = self._labels_obj.get_attribute(tag_matches[0], "source", labeltype="tag", use_default=False)
+                        this_target = self._labels_obj.get_attribute(tag_matches[0], "target", labeltype="tag", use_default=False)
                         if not this_source:
                             # If we don't have matching tag defined in sources-targets sheet, just create it to/from income
-                            def_target = self._labels_obj.get_attribute(v, "target",
-                                                                        use_default=False)  # lookup the target we would have without tag matching
+                            def_target = self._labels_obj.get_attribute(v, "target", use_default=False)  # lookup the target we would have without tag matching
                             if def_target == "Income":  # Note: Breaks if we have income flows more than one deep
                                 this_source = tag_matches[0]
                                 this_target = "Income"
@@ -575,9 +566,7 @@ class Transactions:
                 self._labels_obj._digraph.add_edge(this_source, this_target)
 
             # Sanity check that we haven't created an orphan edge
-            if not (is_deduction or tag_type == 's-tag') and "Income" not in nx.ancestors(self._labels_obj._digraph,
-                                                                                          this_target) and "Income" not in nx.descendants(
-                    self._labels_obj._digraph, this_source):
+            if not (is_deduction or tag_type == 's-tag') and "Income" not in nx.ancestors(self._labels_obj._digraph, this_target) and "Income" not in nx.descendants(self._labels_obj._digraph, this_source):
                 print(f"{self._df.loc[k]}")
                 raise Exception(f"No path to \'Income\' from {this_source}:{this_target}")
 
@@ -587,29 +576,28 @@ class Transactions:
 
             self.process_report += f"[{this_step_id}] FINISHED processing labels\n"
 
+
     def process_rows(self):
         """
           Process individual transactions, creating synthetic transactions as needed to satisfy flows
         """
         msg = f"Processing row data on {len(self._df)} rows"
-        self.process_report += f"\n{'-' * 60}\nRunning Transactions.process_rows()\n{'-' * 60}\n"
+        self.process_report += f"\n{'-'*60}\nRunning Transactions.process_rows()\n{'-'*60}\n"
         self.process_report += msg + "\n"
         if self._app_settings.verbose:
             print(msg)
-        for k, v in enumerate(self._df["Source"]):
+        for k,v in enumerate(self._df["Source"]):
             this_row = self._df.loc[k]
             this_step_id = str(uuid4())[:8]
             is_recurring = False
             self.process_report += f"[{this_step_id}] START Processing {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | ${self._df.at[k, 'Amount']}\n"
             if self._app_settings.verbose:
-                print(
-                    f"{'-' * 40}\nGot a transaction: {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']}:{self._df.at[k, 'Target']} | ${self._df.at[k, 'Amount']}\n")
+                print(f"{'-'*40}\nGot a transaction: {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']}:{self._df.at[k, 'Target']} | ${self._df.at[k, 'Amount']}\n")
 
             # Check for tag match(es)
             # Note currently we will only ever use the first match.
             # TODO: discard tag if tag is "Recurring" AND _app_settings.recurring is True
-            tag_matches = DataRow.tag_matches(self._df.at[k, "Tags"],
-                                              self._app_settings.tags)  # None if flag is not enabled or no matches
+            tag_matches = DataRow.tag_matches(self._df.at[k, "Tags"], self._app_settings.tags)  # None if flag is not enabled or no matches
             tag_type = None
             if tag_matches:
                 tag_type = self._labels_obj.get_attribute(tag_matches[0], "type")  # Get tag type
@@ -653,16 +641,15 @@ class Transactions:
                             comment='Synthetic row for sales tax',
                             distribution=this_row.Distribution
                         ), True)
-                        self._df.at[k, "Amount"] = round(this_row.Amount + this_row["Sales Tax"],
-                                                         2)  # For this to behave as expected, it needs to add the sales tax amount back to the original Amount
+                        self._df.at[k, "Amount"] = round(this_row.Amount + this_row["Sales Tax"], 2)  # For this to behave as expected, it needs to add the sales tax amount back to the original Amount
                         self.process_report += f"[{this_step_id}] UPDATED: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount} -> ${self._df.at[k, 'Amount']}\n"
+
 
             # Handle tips by creating new Tips child target from this original target row & add tip back to original row amount
             # Note: if store or tag processing is being done, this may already be one removed from the original category
             if not is_empty(this_row["Tips"], True):
                 self.process_report += f"[{this_step_id}] ADDED: {this_row.Date} | {this_row.Description} | {this_row.Target} -> 'Tips' | ${this_row['Tips']}\n"
-                orig_amount = self._df.at[
-                    k, "Amount"]  # Sales tax computation may have changed from this_row.Amount value
+                orig_amount = self._df.at[k, "Amount"]  # Sales tax computation may have changed from this_row.Amount value
                 self.add_row(DataRow.create(
                     date=this_row.Date,
                     category_name="Tips",
@@ -674,8 +661,7 @@ class Transactions:
                     comment='Synthetic row for tips',
                     distribution=this_row.Distribution
                 ), True)
-                self._df.at[k, "Amount"] = round(orig_amount + this_row["Tips"],
-                                                 2)  # For this to behave as expected, it needs to add the tips amount back to the original Amount
+                self._df.at[k, "Amount"] = round(orig_amount + this_row["Tips"], 2)  # For this to behave as expected, it needs to add the tips amount back to the original Amount
                 self.process_report += f"[{this_step_id}] UPDATED: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${orig_amount} -> ${self._df.at[k, 'Amount']}\n"
 
             # Traverse DAG from row source back to Income, adding a synthetic row for each edge it finds.
@@ -685,8 +671,7 @@ class Transactions:
             if self._df.at[k, "Type"] == 'deduction':  # deduction types skip DAG processing for now
                 self.process_report += f"[{this_step_id}] SKIPPING DAG traversal, since this is a deduction type.\n"
                 if self._app_settings.verbose:
-                    print(
-                        f"Skipping DAG checks as this was a deductions type entry: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount}")
+                    print(f"Skipping DAG checks as this was a deductions type entry: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount}")
                 continue
 
             # traverse graph
@@ -724,14 +709,12 @@ class Transactions:
                 if self._app_settings.verbose:
                     print(f"Searched DAG for {start_node} -> {end_node} and got group: {pgroups}...")
                 if len(pgroups) != 1:
-                    print(
-                        f"Edge paths search did not yield the expected number of groups! {pgroups}")  # Potentially an error condition. Maybe raise an exception
+                    print(f"Edge paths search did not yield the expected number of groups! {pgroups}")  # Potentially an error condition. Maybe raise an exception
                 for pgroup in pgroups:
                     # Each edge path will be an array of tuples, like [(source1,target1), (source2,target2), ...]
                     # Iterate over the paths (ignoring the one that matches the original entry) and create synthetic entries for each one.
                     for pitem in pgroup:
-                        if pitem == (
-                        this_row.Source, this_row.Target):  # Don't need to process the pair we already have
+                        if pitem == (this_row.Source, this_row.Target): # Don't need to process the pair we already have
                             continue
                         syn_source, syn_target = pitem
                         if syn_source == "Income" and tag_type == 's-tag':
@@ -741,8 +724,7 @@ class Transactions:
                             syn_target = tag_matches[0]  # TODO: verify that this case is handled as expected
                         self.process_report += f"[{this_step_id}] ADDED: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}\n"
                         if self._app_settings.verbose:
-                            print(
-                                f"Adding synthetic entry: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}")
+                            print(f"Adding synthetic entry: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}")
                         self.add_row(DataRow.create(
                             date=this_row.Date,
                             category_name=this_row.Category,
@@ -755,22 +737,21 @@ class Transactions:
                             distribution=this_row.Distribution
                         ), True)
 
-            self.process_report += f"[{this_step_id}] DONE processing.\n{'-' * 40}\n"
+            self.process_report += f"[{this_step_id}] DONE processing.\n{'-'*40}\n"
 
     def collapse(self):
-        self.process_report += f"\n{'-' * 40}\nStepping into Transactions.collapse()\n{'-' * 40}\n"
+        self.process_report += f"\n{'-'*40}\nStepping into Transactions.collapse()\n{'-'*40}\n"
         if self._app_settings.verbose:
             print("Aggregating all source-target pairs")
         # Collapse all the pairs down for cleaner flows
         grouped_df = self._df.groupby(['Source', 'Target']).agg({'Amount': 'sum'})
-        grouped_df.reset_index(
-            inplace=True)  # Resetting an index appears to just create a new one unless the drop argument is passed in, but that's fine in this case.
-        self._grouped_df = grouped_df  # TODO: Review grouped_df vs _df
+        grouped_df.reset_index(inplace=True)  # Resetting an index appears to just create a new one unless the drop argument is passed in, but that's fine in this case.
+        self._grouped_df = grouped_df # TODO: Review grouped_df vs _df
         if self._app_settings.verbose:
             print(f"Collapsed {len(self._df)} transactions down to {len(self._grouped_df)}")
 
     def create_surplus_deficit_flows(self):
-        self.process_report += f"\n{'-' * 40}\nStepping into Transactions.create_surplus_deficit_flows()\n{'-' * 40}\n"
+        self.process_report += f"\n{'-'*40}\nStepping into Transactions.create_surplus_deficit_flows()\n{'-'*40}\n"
         if self.surplus_deficit_processed:
             print("Surplus/deficit flows have already been processed!")
             return
@@ -778,8 +759,7 @@ class Transactions:
         if self._app_settings.verbose:
             print("Computing source/deficit flows")
         # Check for s-tag nodes
-        node_types = nx.get_node_attributes(self._labels_obj._digraph,
-                                            'type')  # Returns a dict like: {'a': 's-tag', 'd': 's-tag, 'c': 'tag', ...}
+        node_types = nx.get_node_attributes(self._labels_obj._digraph, 'type')  # Returns a dict like: {'a': 's-tag', 'd': 's-tag, 'c': 'tag', ...}
         s_nodes = [i for i in node_types if node_types[i] == 's-tag']  # A list of s-nodes
         s_nodes.append("Income")
 
@@ -821,7 +801,6 @@ class Transactions:
                     this_label["target"] = f'{s_node} Surplus'
                     self._labels_obj._lookup[f'{s_node} Surplus'] = this_label
 
-
             elif total_expenses > total_income:
                 # TODO: If using feed_in arg, copy Income surplus (if any) to s-tag?? (or, more accurately, s-tag deficit from income)
                 deficit = total_expenses - total_income
@@ -841,8 +820,9 @@ class Transactions:
                     this_label["target"] = f'{s_node} Deficit'
                     self._labels_obj._lookup[f'{s_node} Deficit'] = this_label
 
+
     def filter_dates(self, start_date, end_date):
-        self.process_report += f"\n{'-' * 40}\nStepping into Transactions.filter_dates({start_date}, {end_date})\n{'-' * 40}\n"
+        self.process_report += f"\n{'-'*40}\nStepping into Transactions.filter_dates({start_date}, {end_date})\n{'-'*40}\n"
         # All times should be pandas._libs.tslibs.timestamps.Timestamp
         # Will discard data outside supplied daterange... TODO: preserve original df??
 
@@ -858,10 +838,10 @@ class Transactions:
         if type(end_date) is not timestamps.Timestamp:
             end_date = pd.to_datetime(end_date)
 
-        if end_date:  # Set up a default date guaranteed to be within the filter range.
-            self.default_date = end_date - datetime.timedelta(days=1)  # One day before our end date
+        if end_date: # Set up a default date guaranteed to be within the filter range.
+            self.default_date = end_date - datetime.timedelta(days=1) # One day before our end date
         elif start_date:
-            self.default_date = start_date + datetime.timedelta(days=1)  # One day ater our start date
+            self.default_date = start_date + datetime.timedelta(days=1) # One day ater our start date
 
         # Start or end date is unbounded, set it to the earliest (or latest) date in the fetched data.
         if not start_date:
@@ -872,18 +852,17 @@ class Transactions:
         if start_date > end_date:
             raise Exception(f"Start date ({start_date.date()}) is after end date ({end_date.date()})!")
 
-        self.process_report += f">> final dates to use for filtering: {start_date} - {end_date} <<\n{'-' * 60}\n"
+        self.process_report += f">> final dates to use for filtering: {start_date} - {end_date} <<\n{'-'*60}\n"
 
         dt_mask = (self._df["Date"] >= start_date) & (self._df["Date"] <= end_date)  # Boolean sum of the two masks
         self._df = self._df[dt_mask]
         self._df = self._df.reset_index(drop=True)
         if len(self._df) == 0:
-            raise Exception(
-                f"Supplied date range ({start_date.date()} - {end_date.date()}) does not contain any transactions!")
+            raise Exception(f"Supplied date range ({start_date.date()} - {end_date.date()}) does not contain any transactions!")
         self.earliest_date = self._df["Date"].sort_values().iloc[0]
-        self.latest_date = self._df["Date"].sort_values().iloc[len(self._df) - 1]
+        self.latest_date = self._df["Date"].sort_values().iloc[len(self._df)-1]
         self.default_date = self.latest_date - datetime.timedelta(days=1)
-        self.process_report += f"DONE filtering dates. Earliest date is: {self.earliest_date}, latest date is: {self.latest_date}, default date is: {self.default_date}, and the dataset now contains {len(self._df)} transactions.\n{'-' * 60}\n"
+        self.process_report += f"DONE filtering dates. Earliest date is: {self.earliest_date}, latest date is: {self.latest_date}, default date is: {self.default_date}, and the dataset now contains {len(self._df)} transactions.\n{'-'*60}\n"
 
     def explode_tags(self):
         # Split each tag out to its own column, with true/false value for a given row
@@ -906,19 +885,18 @@ class Transactions:
             print("Amounts have already been distributed!")
             return
         self.amount_distributions = True
-        self.process_report += f"{'-' * 60}\nRunning Transactions.distribute_amounts()\n{'-' * 60}\n"
+        self.process_report += f"{'-'*60}\nRunning Transactions.distribute_amounts()\n{'-'*60}\n"
         df_idx = len(self._df)
         # Loop through dataset looking for distributed rows
-        for k, v in enumerate(self._df["Distribution"]):
+        for k,v in enumerate(self._df["Distribution"]):
             if not is_empty(v, True):
-                original_amount = float(self._df.at[k, "Amount"]), self._df.at[
-                    k, "Sales Tax"]  # A tuple with (Amount, Sales Tax)
+                original_amount = float(self._df.at[k, "Amount"]), self._df.at[k, "Sales Tax"]  # A tuple with (Amount, Sales Tax)
                 original_date = self._df.at[k, "Date"]
-                dist_amount = original_amount[0] / int(v)  # Calculate total amount / distributions
+                dist_amount = original_amount[0]/int(v)  # Calculate total amount / distributions
                 dist_sales_tax = 0
                 dists = []
                 if not is_empty(original_amount[1], True):
-                    dist_sales_tax = float(original_amount[1]) / int(v)  # Calculate sales tax amount / distributions
+                    dist_sales_tax = float(original_amount[1])/int(v) # Calculate sales tax amount / distributions
                 # Reset original transaction to distirbution amount
                 self.process_report += f"UPDATED: {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']} -> {self._df.at[k, 'Target']} | ${dist_amount} (+ ${dist_sales_tax})\n"
                 self._df.at[k, "Amount"] = dist_amount
@@ -926,8 +904,7 @@ class Transactions:
                 # Create Synthetic entries for distributed transactions
                 counter = v
                 while counter > 1:  # Don't need to do the first one, as we changed it in place
-                    new_date = original_date + datetime.timedelta(
-                        weeks=(counter - 1) * 4.33)  # We assume that the distrubtion value is in months.
+                    new_date = original_date + datetime.timedelta(weeks=(counter-1)*4.33)  # We assume that the distrubtion value is in months.
                     self.process_report += f"ADDED: {new_date} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']} -> {self._df.at[k, 'Target']} | ${dist_amount} (+ ${dist_sales_tax})\n"
                     # create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="", row_type="", distribution=0):
                     # Assuming no tips on distributed transactions for now
@@ -949,7 +926,7 @@ class Transactions:
                 for row in dists:
                     self._df.loc[df_idx] = row  # Add check_data_row here?
                     df_idx += 1
-            self.latest_date = self._df["Date"].sort_values()[len(self._df) - 1]  # Reset latest date value
+            self.latest_date = self._df["Date"].sort_values()[len(self._df)-1]  # Reset latest date value
 
     def update_title(self):
         # TODO: add flag information to title
@@ -960,6 +937,38 @@ class Transactions:
             self.title += f"<br>    Tags being excluded: {', '.join(self._app_settings.exclude_tags)}"
         if self._app_settings.tags:
             self.title += f"<br>    Tags being used: {', '.join(self._app_settings.tags)}"
+        if self._app_settings.recurring:
+            self.title += f"<br>    Recurring transactions are being split out"
+
+
+class TransactionRow:
+    def __init__(self, df, key):
+        self.key = key
+        self.data = {}
+        for col in DataRow.fields:
+            val = df.at[key, col]
+            if is_null(val) and DataRow.fields[col]["required"]:
+                raise Exception(f"Required column {col} was null for {repr(df[key])}")
+            self.data[col] = val
+
+    class TransactionDate:
+        def __init__(self, value):
+            self._required = True
+            self._nullable = True
+            self._datatype = timestamps.Timestamp
+            self._coerce_type = True  # TODO: switch to a function that coerces. Or just use getters and setters.
+            self._comment = ""
+            self._value = pd.to_datetime(value)
+
+        @property
+        def value(self):
+            return self._value
+
+        @value.setter
+        def value(self, val):
+            self._value = pd.to_datetime(val)
+
+
 
 
 class DataRow:
@@ -1071,15 +1080,14 @@ class DataRow:
                 if this_validator["nullable"]:
                     pass
                 else:
-                    raise Exception(f"Non-nullable field {vkeys[counter - 1]} was nulled in {drow}")
+                    raise Exception(f"Non-nullable field {vkeys[counter-1]} was nulled in {drow}")
             else:
                 if type(this_value) != this_validator["type"]:
                     if this_validator["force_type"]:
                         try:
                             this_value = this_validator["type"](this_value)
                         except ValueError:
-                            raise Exception(
-                                f"Could not coerce \'{this_value}\' at idx {counter - 1} to {this_validator['type']} for this row: {drow}")
+                            raise Exception(f"Could not coerce \'{this_value}\' at idx {counter - 1} to {this_validator['type']} for this row: {drow}")
                 if type(this_value) != this_validator["type"]:
                     raise Exception(f"Invalid type at idx {counter - 1} for {this_value} in {drow}")
                 if this_validator.get("allowed_values") and this_value not in this_validator["allowed_values"]:
@@ -1087,8 +1095,7 @@ class DataRow:
         return drow
 
     @staticmethod
-    def create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="",
-               row_type="", distribution=0):
+    def create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="", row_type="", distribution=0):
         if is_null(amount):
             amount = 0
         else:
@@ -1117,9 +1124,7 @@ class DataRow:
                 sales_tax = float(sales_tax)
             except ValueError:
                 sales_tax = 0
-        return DataRow.validate(
-            [date, category_name, description, tags, comment, source, target, row_type, distribution, amount, sales_tax,
-             tips])
+        return DataRow.validate([date, category_name, description, tags, comment, source, target, row_type, distribution, amount, sales_tax, tips])
 
     @staticmethod
     def tag_matches(row_tags, search_tags):
@@ -1133,33 +1138,6 @@ class DataRow:
                 return [i for i in set(search_tags).intersection(set(this_exploded_tags))]
         return None
 
-
-class TransactionRow:
-  def __init__(self, df, key):
-    self.key = key
-    self.data = {}
-    for col in DataRow.fields:
-      val = df.at[key, col]
-      if is_null(val) and DataRow.fields[col]["required"]:
-        raise Exception(f"Required column {col} was null for {repr(df[key])}")
-      self.data[col] = val
-
-  class TransactionDate:
-    def __init__(self, value):
-      self._required = True
-      self._nullable = True
-      self._datatype = timestamps.Timestamp
-      self._coerce_type = True  # TODO: switch to a function that coerces. Or just use getters and setters.
-      self._comment = ""
-      self._value = pd.to_datetime(value)
-
-    @property
-    def value(self):
-      return self._value
-
-    @value.setter
-    def value(self, val):
-      self._value = pd.to_datetime(val)
 
 # Define some helper functions ==============================================================================================
 
@@ -1181,7 +1159,6 @@ def is_null(obj):
         return True
     return False
 
-
 def is_empty(obj, nonzero=False):
     # Check for null, nan, none, etc as well as empty string. Optionally check for zero values. Swallow errors casting to values
     if is_null(obj):
@@ -1202,7 +1179,6 @@ def is_empty(obj, nonzero=False):
         if obj_as_float == 0:
             return True
     return False
-
 
 def save_report(report_data, basename):
     dtnow = pd.Timestamp.today()
@@ -1241,7 +1217,6 @@ def validate_date_string(input, allow_empty=False):
         return True
     return False
 
-
 def func_Convert_Gsheet_dates(g_timestamp, default_date):
     # Note: currently unused
     if g_timestamp:
@@ -1250,15 +1225,14 @@ def func_Convert_Gsheet_dates(g_timestamp, default_date):
             # Likely means we got an unformatted timestamp from gsheets.
             # See also: https://developers.google.com/sheets/api/guides/formats for information about Google sheets timestamp format
             # See: http://www.cpearson.com/excel/datetime.htm for why Dec 30, 1899
-            return pd.to_datetime(g_timestamp_as_int * 86400 * 1000, unit='ms', origin="1899-12-30")
+            return pd.to_datetime(g_timestamp_as_int * 86400*1000, unit='ms', origin="1899-12-30")
         except ValueError:
             # We'll assume this means we got a formatted date string
             return pd.to_datetime(g_timestamp)
     else:
         if not default_date:
             return pd.Timestamp.today()
-        return pd.to_datetime(default_date)  # default_date
-
+        return pd.to_datetime(default_date) # default_date
 
 def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_src_target, service_account_credentials):
     # app_settings_obj.data_source, app_settings_obj.data_sheet, app_settings_obj.labels_source, app_settings_obj.g_creds
@@ -1269,11 +1243,9 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
             if not app_settings_obj.labels_source or not app_settings_obj.labels_source.endswith('.csv'):
                 app_settings_obj.labels_source = input("Enter location for sources-targets CSV data: ")
             if not app_settings_obj.labels_source.endswith('.csv') or not path.isfile(app_settings_obj.labels_source):
-                raise Exception(
-                    f"Supplied sources-targets file ({app_settings_obj.labels_source}) was not found or is the wrong format.")
+                raise Exception(f"Supplied sources-targets file ({app_settings_obj.labels_source}) was not found or is the wrong format.")
             if not app_settings_obj.data_source.endswith('.csv') or not path.isfile(app_settings_obj.data_source):
-                raise Exception(
-                    f"Supplied transactions file ({app_settings_obj.data_source}) was not found or is the wrong format.")
+                raise Exception(f"Supplied transactions file ({app_settings_obj.data_source}) was not found or is the wrong format.")
             with open(app_settings_obj.labels_source, 'r') as f:
                 dr = DictReader(f)
                 src_target = list(dr)
@@ -1281,23 +1253,17 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
         else:
             gc = pygsheets.authorize(service_file=app_settings_obj.g_creds)
             if app_settings_obj.data_source not in gc.spreadsheet_titles():
-                raise Exception(
-                    f"Requested spreadsheet ({app_settings_obj.data_source}) is not available to configured service account (see: '{app_settings_obj.g_creds}')")
-            sh = gc.open(app_settings_obj.data_source)  # TODO: error handling
+                raise Exception(f"Requested spreadsheet ({app_settings_obj.data_source}) is not available to configured service account (see: '{app_settings_obj.g_creds}')")
+            sh = gc.open(app_settings_obj.data_source) # TODO: error handling
             sh_titles = [i.title for i in sh.worksheets()]
             if app_settings_obj.labels_source not in sh_titles:
-                raise Exception(
-                    f"Sources-Targets worksheet \'{app_settings_obj.labels_source}\' was not found in {app_settings_obj.data_source}!")
+                raise Exception(f"Sources-Targets worksheet \'{app_settings_obj.labels_source}\' was not found in {app_settings_obj.data_source}!")
             if app_settings_obj.data_sheet not in sh_titles:
-                raise Exception(
-                    f"Data worksheet '{app_settings_obj.data_sheet}' was not found in {app_settings_obj.data_source}!")
-            src_target = sh.worksheet_by_title(
-                app_settings_obj.labels_source).get_all_records()  # Fetch source-target info and colors.
-            df = sh.worksheet_by_title(
-                app_settings_obj.data_sheet).get_as_df()  # value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
+                raise Exception(f"Data worksheet '{app_settings_obj.data_sheet}' was not found in {app_settings_obj.data_source}!")
+            src_target = sh.worksheet_by_title(app_settings_obj.labels_source).get_all_records()  # Fetch source-target info and colors.
+            df = sh.worksheet_by_title(app_settings_obj.data_sheet).get_as_df() #value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
     except Exception as e:
-        print(
-            f"Unable to open data source: {app_settings_obj.data_source}. Please check your names and try again. Error was {e}")
+        print(f"Unable to open data source: {app_settings_obj.data_source}. Please check your names and try again. Error was {e}")
         raise SystemExit
 
     # Clean up value formatting
@@ -1309,7 +1275,6 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
 
     return src_target, df
 
-
 def normalize_amounts(df_row):
     for atype in ["Amount", "Sales Tax", "Tips"]:
         val = df_row[atype]
@@ -1319,6 +1284,6 @@ def normalize_amounts(df_row):
             val = float(val)
         except ValueError:
             if '$' in val or ',' in val:
-                val = float(val.replace('$', '').replace(',', ''))
+                val = float(val.replace('$','').replace(',',''))
         df_row[atype] = val
     return df_row
