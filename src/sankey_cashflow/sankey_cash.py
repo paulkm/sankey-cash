@@ -20,9 +20,6 @@ from pandas._libs.tslibs import timestamps, nattype
 # https://pygsheets.readthedocs.io/en/stable/
 # More complex example: https://plotly.com/python/sankey-diagram/
 
-# Usage:
-# > source ./venv/bin/activate
-# > python3 -m create_sankey_diagram
 
 # Notes:
 #  - About mutability: Pandas DataFrames are mutable except when they're not... I am treating them as immutable here and when necessary to make changes using return values and re-assignment. From the Pandas docs:
@@ -881,6 +878,7 @@ class Transactions:
         # Note: this creates synthetic transactions in the future, which will affect latest date.
         # TODO: verify that this will fall within the current date filters, if being used.
         #       current method is to just call this before filter_dates() would need to refactor to be more robust
+        # TODO: handle negative values to distribute backwards (as in, a charge that represents past costs)
         if self.amount_distributions:
             print("Amounts have already been distributed!")
             return
@@ -890,6 +888,12 @@ class Transactions:
         # Loop through dataset looking for distributed rows
         for k,v in enumerate(self._df["Distribution"]):
             if not is_empty(v, True):
+                reverse_distribution = False
+                v = int(v)
+                if v < 0:
+                    # Negative distribution
+                    reverse_distribution = True
+                    v = abs(v)
                 original_amount = float(self._df.at[k, "Amount"]), self._df.at[k, "Sales Tax"]  # A tuple with (Amount, Sales Tax)
                 original_date = self._df.at[k, "Date"]
                 dist_amount = original_amount[0]/int(v)  # Calculate total amount / distributions
@@ -904,7 +908,10 @@ class Transactions:
                 # Create Synthetic entries for distributed transactions
                 counter = v
                 while counter > 1:  # Don't need to do the first one, as we changed it in place
-                    new_date = original_date + datetime.timedelta(weeks=(counter-1)*4.33)  # We assume that the distrubtion value is in months.
+                    if reverse_distribution:
+                        new_date = original_date - datetime.timedelta(weeks=(counter-1)*4.33)  # We assume that the distrubtion value is in months.
+                    else:
+                        new_date = original_date + datetime.timedelta(weeks=(counter-1)*4.33)  # We assume that the distrubtion value is in months.
                     self.process_report += f"ADDED: {new_date} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']} -> {self._df.at[k, 'Target']} | ${dist_amount} (+ ${dist_sales_tax})\n"
                     # create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="", row_type="", distribution=0):
                     # Assuming no tips on distributed transactions for now
