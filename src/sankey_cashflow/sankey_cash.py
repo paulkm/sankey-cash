@@ -325,7 +325,7 @@ class Transactions:
 
     def audit(self, audit_data, date_range=None):
         """
-            Compare transaction data to audit data. Note this is specifically set up to use the column format for WSECU exports
+            Compare transaction data to audit data. Note this is specifically set up to use the column format for my bank export data. YMMV.
             Step 1: Apply date filtering (if applicable) (TODO: Test date handling)
             Step 2: Create a column with sums for amount, tax, tips to use for lookups
             Step 3: Loop through the bank export and search for matching entries based on the transaction amount
@@ -361,7 +361,7 @@ class Transactions:
 
         # Step 2
         rowsums = self._df.apply(safe_sum, axis=1)
-        
+
         # Step 3
         for idx, row in audit_data.iterrows():
             transaction_found = False
