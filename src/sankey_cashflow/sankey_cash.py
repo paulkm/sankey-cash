@@ -68,6 +68,8 @@ class AppSettings:
                 self.hover = "Description"
             if args.hover == "tags":
                 print("Tags in hovertext not yet implemented!")
+            if args.hover.lower() in ["none", "no", "false"]:
+                self.hover = None
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
