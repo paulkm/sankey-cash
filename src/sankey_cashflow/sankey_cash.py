@@ -62,6 +62,12 @@ class AppSettings:
         self.exclude_tags = None
         self.stores = None
         self.tag_override = False
+        self.hover = "Category"
+        if args.hover:
+            if args.hover.lower() in ["desc", "stores", "description"]:
+                self.hover = "Description"
+            if args.hover == "tags":
+                print("Tags in hovertext not yet implemented!")
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
