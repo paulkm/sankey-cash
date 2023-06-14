@@ -44,6 +44,7 @@ class AppSettings:
     def __init__(self, args):
         self.DEFAULT_START_DATE = pd.to_datetime("10/1/2022")
         self.data_source = args.source
+        self.audit_mode = args.audit
         self.data_sheet = args.sheet or "current_exp"
         self._labels_source = args.srcmap or "Sources-Targets"
         self.filter_dates = args.range
@@ -61,6 +62,14 @@ class AppSettings:
         self.exclude_tags = None
         self.stores = None
         self.tag_override = False
+        self.hover = "Category"
+        if args.hover:
+            if args.hover.lower() in ["desc", "stores", "description"]:
+                self.hover = "Description"
+            if args.hover == "tags":
+                print("Tags in hovertext not yet implemented!")
+            if args.hover.lower() in ["none", "no", "false"]:
+                self.hover = None
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
@@ -321,6 +330,57 @@ class Transactions:
     def _validate_df(self):
         # Validate header row
         return DataRow.validate(self._df.columns.to_list(), True)
+
+    def audit(self, audit_data, date_range=None):
+        """
+            Compare transaction data to audit data. Note this is specifically set up to use the column format for my bank export data. YMMV.
+            Step 1: Apply date filtering (if applicable) (TODO: Test date handling)
+            Step 2: Create a column with sums for amount, tax, tips to use for lookups
+            Step 3: Loop through the bank export and search for matching entries based on the transaction amount
+            Step 3a: If multiple transactions have the same amount, check that any of them fall +/- 5 days. Note: this does create a edge case where you could have a false negative if two transaction had the same values. within the search time.
+            Write out a report with any suspected missings. Note: this will be a little noisy since I break transactions into multiple rows sometimes. (eg, Costco visits)
+        """
+        dt_today = datetime.datetime.today()
+        audit_report = ""
+
+        # Step 1
+        if self._app_settings.filter_dates:
+            if not date_range:
+                raise Exception("Filter dates flag was True, but no dates were passed in!")
+            start_date = date_range[0]
+            end_date = date_range[1]
+            if end_date is None and not self._app_settings.all_time:
+                end_date = dt_today
+            if start_date is None and not self._app_settings.all_time:
+                start_date = self._app_settings.DEFAULT_START_DATE
+            audit_data = df_date_filter(audit_data, start_date, end_date)
+        elif not self._app_settings.all_time:
+            audit_data = df_date_filter(audit_data, self._app_settings.DEFAULT_START_DATE, dt_today)
+        
+        def safe_sum(pd_series):
+            """
+            Safely sum a transaction frame
+            """
+            def vval(val):
+                if not val:
+                    return 0
+                return round(float(val), 2)
+            return round(pd_series["Amount"] + vval(pd_series.get("Sales Tax")) + vval(pd_series.get("Tips")),2)            
+
+        # Step 2
+        rowsums = self._df.apply(safe_sum, axis=1)
+
+        # Step 3
+        for idx, row in audit_data.iterrows():
+            transaction_found = False
+            hits = self._df[rowsums == row["Amount"]]
+            for hit in hits["Date"]:
+                if (row["Date"] < (hit + datetime.timedelta(days=5))) and (row["Date"] > (hit - datetime.timedelta(days=5))):
+                    transaction_found = True
+            if not transaction_found:
+                audit_report += f"Transaction not found for {row['Date']} - {row['Description']} - {row['Amount']}\n"
+        
+        return audit_report
 
     def process(self, date_range=None):
         """
@@ -1187,6 +1247,24 @@ def is_empty(obj, nonzero=False):
             return True
     return False
 
+def df_date_filter(df, start_date, end_date):
+    # Filter a dataframe by date
+    if is_empty(start_date) and is_empty(end_date):
+        return df
+    if is_empty(start_date):
+        df = df[df["Date"] <= end_date]
+    elif is_empty(end_date):
+        df = df[df["Date"] >= start_date]
+    else:
+        df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+    df.reset_index(drop=True)
+    if len(df) == 0:
+        # TODO: this will error if start_date or end_date are not dates
+        raise Exception(f"Supplied date range ({start_date.date()} - {end_date.date()}) does not contain any transactions!")
+    earliest_date = df["Date"].sort_values().iloc[0]
+    latest_date = df["Date"].sort_values().iloc[len(df)-1]
+    return df
+
 def save_report(report_data, basename):
     dtnow = pd.Timestamp.today()
     fname = f"{basename}-{dtnow}.txt"
@@ -1281,6 +1359,12 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
         raise Exception(f"Source data is not in correct format! Message was: {is_valid[1]}")
 
     return src_target, df
+
+def read_csv_as_df(csv_file):
+    if not csv_file.endswith('.csv') or not path.isfile(csv_file):
+        raise Exception(f"Supplied CSV file ({csv_file}) was not found or is the wrong format.")
+    df = pd.read_csv(csv_file)
+    return df
 
 def normalize_amounts(df_row):
     for atype in ["Amount", "Sales Tax", "Tips"]:
