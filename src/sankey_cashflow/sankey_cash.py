@@ -309,9 +309,6 @@ class Transactions:
         self._app_settings = app_settings_obj
         self._labels_obj = labels_obj
         is_valid = self._validate_df()
-        if not is_valid[0]:
-            raise Exception(f"Source columns failed validation! Error was: {is_valid[1]}")
-        # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
             print(f"Converting data in {self.length} fetched rows to datetimes...")
         self._df["Date"] = pd.to_datetime(self._df["Date"]) # Does not mutate dataframe
@@ -329,7 +326,14 @@ class Transactions:
 
     def _validate_df(self):
         # Validate header row
-        return DataRow.validate(self._df.columns.to_list(), True)
+        header_is_valid = DataRow.validate(self._df.columns.to_list(), True)
+        if not header_is_valid[0]:
+            raise Exception(f"Source columns failed validation! Error was: {header_is_valid[1]}")
+        # Validate data rows
+        amt_types = [isinstance(i,float) for i in self._df["Amount"]]
+        if False in amt_types:
+            invalid_loc = amt_types.index(False)  # Note, only return first invalid location
+            raise Exception(f"Invalid data found at row {invalid_loc}!\n {self._df.iloc[invalid_loc]}")
 
     def audit(self, audit_data, date_range=None):
         """
@@ -1034,8 +1038,6 @@ class TransactionRow:
         @value.setter
         def value(self, val):
             self._value = pd.to_datetime(val)
-
-
 
 
 class DataRow:
