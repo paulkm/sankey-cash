@@ -309,6 +309,7 @@ class Transactions:
         self._app_settings = app_settings_obj
         self._labels_obj = labels_obj
         is_valid = self._validate_df()
+        # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
             print(f"Converting data in {self.length} fetched rows to datetimes...")
         self._df["Date"] = pd.to_datetime(self._df["Date"]) # Does not mutate dataframe
