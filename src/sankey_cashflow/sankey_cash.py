@@ -172,10 +172,10 @@ class RowLabels:
         self._digraph = nx.DiGraph()
         self._digraph.add_node("Income", ntype="income")
         self.process_report = f"RowLabel report\n{'='*60}\n\n\n"
-        required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Link color', 'Node color']
+        required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Classification', 'Link color', 'Node color']
         if False in [k in self._labeldata[0].keys() for k in required_columns]:
             raise Exception(f"Sources-Targets sheet does not have all required columns! Needed: {required_columns}. Found: {list(self._labeldata[0].keys())}")
-        self._available_attributes = ['source', 'target', 'link_color', 'node_color', 'type']
+        self._available_attributes = ['source', 'target', 'Classification', 'link_color', 'node_color', 'type']
         # TODO: validation
         self._lookup = {}
         # Map out data to lookup dict
@@ -187,7 +187,14 @@ class RowLabels:
                 raise Exception(f"Duplicate label! {i['Category Name']}")
             # Add to internal lookup dict
             self.process_report += f"ADDING LOOKUP: {i}\n"
-            self._lookup[i['Category Name']] = {'source': i.get('Source'), 'target': i.get('Target'), 'link_color': i.get('Link color'), 'node_color': i.get('Node color'), 'type': i.get('Type')}
+            self._lookup[i['Category Name']] = {
+                'source': i.get('Source'), 
+                'target': i.get('Target'),
+                'classification': i.get('Classification'),
+                'link_color': i.get('Link color'), 
+                'node_color': i.get('Node color'), 
+                'type': i.get('Type')
+            }
             if i.get("Source") == "DEDUCTIONS":
                 # These have to be dynamically generated - skip adding to DAG for now (or maybe entirely)
                 # TODO (maybe): switch to using type and/or DAG attributes
@@ -327,6 +334,7 @@ class Transactions:
 
     def _validate_df(self):
         # Validate header row
+        # WIP: port over new sources-targets column
         header_is_valid = DataRow.validate(self._df.columns.to_list(), True)
         if not header_is_valid[0]:
             raise Exception(f"Source columns failed validation! Error was: {header_is_valid[1]}")
@@ -1324,6 +1332,7 @@ def func_Convert_Gsheet_dates(g_timestamp, default_date):
 
 def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_src_target, service_account_credentials):
     # app_settings_obj.data_source, app_settings_obj.data_sheet, app_settings_obj.labels_source, app_settings_obj.g_creds
+    # WIP: Handle source data in mutiple sheets, eg. 1 sheet per year...
     try:
         if app_settings_obj.data_source.endswith(".csv"):
             # See sample_data/expenses.csv and labels.csv for examples of data format.
