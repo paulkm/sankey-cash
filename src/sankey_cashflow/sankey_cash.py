@@ -9,8 +9,10 @@ from csv import DictReader
 import re
 import networkx as nx
 from uuid import uuid4
+from pathlib import Path
 # Types
 from pandas._libs.tslibs import timestamps, nattype
+from typing import List, Dict, Tuple, Union, Optional
 
 # import pdb
 
@@ -43,10 +45,10 @@ class AppSettings:
     """
     def __init__(self, args):
         self.DEFAULT_START_DATE = pd.to_datetime("10/1/2022")
-        self.data_source = args.source
+        self.data_source = args.source  # A csv file or a google Sheets document containing transactions data. (In the case of the latter, a sheet name must be provided as well)
         self.audit_mode = args.audit
-        self.data_sheet = args.sheet or "current_exp"
-        self._labels_source = args.srcmap or "Sources-Targets"
+        self.data_sheet = args.sheet or "Transactions_*"  # The name (or prefix plus wildcard) of the sheet containing the transactions data (if data_source is a google Sheets document
+        self._labels_source = args.srcmap or "Sources-Targets"  # A csv file or sheet name containing sources and targets
         self.filter_dates = args.range
         self.separate_taxes = args.separate_tax
         self.verbose = args.verbose
@@ -123,7 +125,7 @@ class AppSettings:
 
     @labels_source.setter
     def labels_source(self, val):
-        if not val or len(val) == 0 or not path.isfile(val):
+        if not val or len(val) == 0 or (val.endswith('.csv') and not path.isfile(val)):
             raise Exception(f"Sources-targets file not found: {val}")
         self._labels_source = val
 
@@ -1333,37 +1335,122 @@ def func_Convert_Gsheet_dates(g_timestamp, default_date):
 def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_src_target, service_account_credentials):
     # app_settings_obj.data_source, app_settings_obj.data_sheet, app_settings_obj.labels_source, app_settings_obj.g_creds
     # WIP: Handle source data in mutiple sheets, eg. 1 sheet per year...
+
+    """
+        self.data_source = args.source  # A csv file or a google Sheets document containing transactions data. (In the case of the latter, a sheet name must be provided as well)
+        self.data_sheet = args.sheet or "Transactions_*"  # The name (or prefix plus wildcard) of the sheet containing the transactions data (if data_source is a google Sheets document
+        self._labels_source = args.srcmap or "Sources-Targets"  # A csv file or sheet name containing sources and targets
+    """
+    def data_source_router(filename:str, file_kind:str, gcreds, sheetname:Union[str, None]=None, gcreds_obj=None, gsheets_obj=None):
+        """
+        Look for data sources either locally or in Google Sheets. Handle wildcards expressions for multiple sheets. Return a list of filenames.
+        :param filename: A filename or wildcard expression, or None (Note: only csv files will use the wildcard expression for this value)
+        :param file_kind: "sources-targets" or "transactions"
+        :param gcreds: Google credentials object
+        :param sheetname: A sheet name or wildcard expression, or None (only applicable to Google Sheets)
+        :param gc: Google client object (optional)
+
+        Returns: {
+            "filename" -> list of strings, 
+            "sheetname" -> list of strings,
+            "filetype" -> ["csv", "gsheet"], 
+            "file_kind" -> ["sources-targets","transactions"], 
+            "gcreds_obj" -> Google credentials object",
+            "gsheets_obj" -> Google sheets object
+        }
+        """
+        file_kind = file_kind.lower()
+        if file_kind not in ["sources-targets", "transactions"]:
+            raise Exception(f"Invalid file kind: {file_kind}")
+        if filename is None:
+            filename = input(f"Enter location for {file_kind} data: ")
+            return data_source_router(filename, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        if filename.endswith(".csv"):
+            if path.isfile(filename): # Switch to pathlib?
+                return {"filename": [filename], "sheetname": [None],"filetype": "csv", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            print(f"File not found: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        if filename.endswith("*"):
+            # Wildcards on filenames only supported for csvs, Gsheets would use sheetnames for wildcard.
+            fileparts = filename.split("/")
+            filepattern = f"{fileparts[-1]}.csv"
+            if len(fileparts[0]) == 0:
+                # This must be an absolute path
+                this_dir = "/" + "/".join(fileparts[1:-1])
+            else:
+                # Possibly a relative path
+                if len(fileparts) > 1:
+                    this_dir = "./" + "/".join(fileparts[:-1])
+                else:
+                    this_dir = "."
+            dir_obj = Path(this_dir)
+            if dir_obj.is_dir():
+                files = list(dir_obj.glob(filepattern))
+                if len(files) > 0:
+                    return {"filename": [str(f) for f in files], "sheetname": [None],"filetype": "csv", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            print("No files found at: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        # If we've gotten this far, we must be looking for a Google Sheets file (late binding of the gc object to reduce calls to authorize)
+        if not gcreds_obj:
+            gcreds_obj = pygsheets.authorize(service_file=gcreds)  # trying to avoid calling this multiple times
+        if filename not in gcreds_obj.spreadsheet_titles():
+            print(f"Spreadsheet not found: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        gsheets_obj = gcreds_obj.open(filename) # TODO: error handling.
+        if not sheetname:
+            sheetname = input(f"Enter worksheet title for spreadsheet {filename}: ")
+            return data_source_router(filename, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        gsheet_titles = [i.title for i in gsheets_obj.worksheets()]
+        if sheetname.endswith("*"):
+            # Wildcard handling for sheetnames
+            results = []
+            for sheet in gsheet_titles:
+                if sheet.startswith(sheetname[:-1]):
+                    results.append(sheet)
+            if len(results) > 0:
+                return {"filename": [filename], "sheetname": results, "filetype": "gsheet", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            print(f"No spreadsheets found matching pattern: \"{sheetname}\" in Google Sheets: \"{filename}\"")
+            return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
+        if sheetname in gsheet_titles:
+            return {"filename": [filename], "sheetname": [sheetname], "filetype": "gsheet", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+        print(f"Spreadsheet \"{sheetname}\" not found in Google Sheets: \"{filename}\"")
+        return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
+
     try:
-        if app_settings_obj.data_source.endswith(".csv"):
-            # See sample_data/expenses.csv and labels.csv for examples of data format.
-            # TODO: validation & error handling
-            if not app_settings_obj.labels_source or not app_settings_obj.labels_source.endswith('.csv'):
-                app_settings_obj.labels_source = input("Enter location for sources-targets CSV data: ")
-            if not app_settings_obj.labels_source.endswith('.csv') or not path.isfile(app_settings_obj.labels_source):
-                raise Exception(f"Supplied sources-targets file ({app_settings_obj.labels_source}) was not found or is the wrong format.")
-            if not app_settings_obj.data_source.endswith('.csv') or not path.isfile(app_settings_obj.data_source):
-                raise Exception(f"Supplied transactions file ({app_settings_obj.data_source}) was not found or is the wrong format.")
-            with open(app_settings_obj.labels_source, 'r') as f:
+        # Get sources-targets file location data
+        # See sample_data/expenses.csv and labels.csv for examples of data format.
+        # TODO: validation & error handling
+        # TODO: there should only ever be one sources-targets file, so data_source_router should handle that
+        src_target = None
+        if app_settings_obj.labels_source.endswith(".csv"):
+            src_target_file = data_source_router(app_settings_obj.labels_source, "sources-targets", app_settings_obj.g_creds, None, None, None)
+        else:
+            src_target_file = data_source_router(app_settings_obj.data_source, "sources-targets", app_settings_obj.g_creds, app_settings_obj.labels_source, None, None)
+        if src_target_file["filetype"] == "csv":
+            # Sources-targets data is returned differently than transactions data, so we need to handle it differently.
+            with open(src_target_file["filename"][0], 'r') as f:
                 dr = DictReader(f)
                 src_target = list(dr)
-            df = pd.read_csv(app_settings_obj.data_source)
         else:
-            gc = pygsheets.authorize(service_file=app_settings_obj.g_creds)
-            if app_settings_obj.data_source not in gc.spreadsheet_titles():
-                raise Exception(f"Requested spreadsheet ({app_settings_obj.data_source}) is not available to configured service account (see: '{app_settings_obj.g_creds}')")
-            sh = gc.open(app_settings_obj.data_source) # TODO: error handling
-            sh_titles = [i.title for i in sh.worksheets()]
-            if app_settings_obj.labels_source not in sh_titles:
-                raise Exception(f"Sources-Targets worksheet \'{app_settings_obj.labels_source}\' was not found in {app_settings_obj.data_source}!")
-            if app_settings_obj.data_sheet not in sh_titles:
-                raise Exception(f"Data worksheet '{app_settings_obj.data_sheet}' was not found in {app_settings_obj.data_source}!")
-            src_target = sh.worksheet_by_title(app_settings_obj.labels_source).get_all_records()  # Fetch source-target info and colors.
-            df = sh.worksheet_by_title(app_settings_obj.data_sheet).get_as_df() #value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
+            # sh = src_target_file["greds_obj"].open(src_target_file["filename"][0]) # TODO: error handling
+            src_target = src_target_file["gsheets_obj"].worksheet_by_title(src_target_file["sheetname"][0]).get_all_records()  # Fetch source-target info and colors.
+
+        # Get transactions file(s) location data
+        df = None
+        transaction_data_file = data_source_router(app_settings_obj.data_source, "transactions", app_settings_obj.g_creds, app_settings_obj.data_sheet, None, None)
+        if transaction_data_file["filetype"] == "csv":
+            # open one or multiple csv files and return a pandas dataframe
+            df = read_csv_as_df(transaction_data_file["filename"])
+        else:
+            # Open one or multiple gsheet worksheets and return a pandas dataframe
+            df = read_gsheet_as_df(transaction_data_file["sheetname"], transaction_data_file["gsheets_obj"])
+
     except Exception as e:
         print(f"Unable to open data source: {app_settings_obj.data_source}. Please check your names and try again. Error was {e}")
         raise SystemExit
 
     # Clean up value formatting
+    df.reset_index(inplace=True,drop=True)
     df = df.transform(normalize_amounts, axis=1)
 
     is_valid = DataRow.validate(df.columns.to_list(), True)
@@ -1373,10 +1460,36 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
     return src_target, df
 
 def read_csv_as_df(csv_file):
-    if not csv_file.endswith('.csv') or not path.isfile(csv_file):
-        raise Exception(f"Supplied CSV file ({csv_file}) was not found or is the wrong format.")
-    df = pd.read_csv(csv_file)
-    return df
+    if type(csv_file) == list:
+        main_csv = csv_file[0]
+        addl_csvs = csv_file[1:]
+    else:
+        main_csv = csv_file
+        addl_csvs = []
+    if not main_csv.endswith('.csv') or not path.isfile(main_csv):
+        raise Exception(f"Supplied CSV file ({main_csv}) was not found or is the wrong format.")
+    main_df = pd.DataFrame(pd.read_csv(main_csv))
+    for i in addl_csvs:
+        if not i.endswith('.csv') or not path.isfile(i):
+            raise Exception(f"Supplied CSV file ({i}) was not found or is the wrong format.")
+        # df = df.append(pd.DataFrame(pd.read_csv(i)), ignore_index=True)
+        add_df = pd.DataFrame(pd.read_csv(i))
+        main_df = pd.concat([main_df, add_df], axis=0)
+    return main_df
+
+def read_gsheet_as_df(gsheet_file, gsheet_obj):
+    # .get_as_df(value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
+    if type(gsheet_file) == list:
+        main_sheet = gsheet_file[0]
+        addl_sheets = gsheet_file[1:]
+    else:
+        main_sheet = gsheet_file
+        addl_sheets = []
+    main_df = gsheet_obj.worksheet_by_title(main_sheet).get_as_df()
+    for i in addl_sheets:
+        add_df = gsheet_obj.worksheet_by_title(i).get_as_df()
+        main_df = pd.concat([main_df, add_df], axis=0)
+    return main_df
 
 def normalize_amounts(df_row):
     for atype in ["Amount", "Sales Tax", "Tips"]:
