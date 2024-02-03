@@ -3,39 +3,50 @@ import pandas as pd
 import plotly.graph_objects as go
 import argparse
 import datetime
+import logging
 from os import path
 from numpy import isnan, float64
 from csv import DictReader
 import re
 import networkx as nx
 from uuid import uuid4
+from pathlib import Path
 # Types
 from pandas._libs.tslibs import timestamps, nattype
+from typing import List, Dict, Tuple, Union, Optional
 
-# import pdb
+logger = logging.getLogger(__name__)
+ConsoleOutputHandler = logging.StreamHandler()
+ConsoleOutputHandler.setLevel(logging.WARNING)  # TODO: override this with params (note: root logger level will also need to be changed)
+ConsoleOutputHandler.name = "console"
+logger.addHandler(ConsoleOutputHandler)
 
-# See: https://lifewithdata.com/2022/08/29/how-to-create-a-sankey-diagram-in-plotly-python/
-# https://erikrood.com/Posts/py_gsheets.html
-# https://github.com/nithinmurali/pygsheets
-# https://pygsheets.readthedocs.io/en/stable/
-# More complex example: https://plotly.com/python/sankey-diagram/
+"""
+See README.md for usage instructions and examples
+
+References:
+- See: https://lifewithdata.com/2022/08/29/how-to-create-a-sankey-diagram-in-plotly-python/
+- https://erikrood.com/Posts/py_gsheets.html
+- https://github.com/nithinmurali/pygsheets
+- https://pygsheets.readthedocs.io/en/stable/
+- More complex example: https://plotly.com/python/sankey-diagram/
 
 
-# Notes:
-#  - About mutability: Pandas DataFrames are mutable except when they're not... I am treating them as immutable here and when necessary to make changes using return values and re-assignment. From the Pandas docs:
-#     ## Mutability and copying of data
-#       All pandas data structures are value-mutable (the values they contain can be altered) but not always size-mutable. The length of a Series cannot be changed, but, for example, columns can be inserted into a DataFrame.
-#       However, the vast majority of methods produce new objects and leave the input data untouched. In general we like to favor immutability where sensible.
-# - Permissions: Create a service account and download credentials in json format, (detailed instructions here: https://pygsheets.readthedocs.io/en/stable/authorization.html)
-#                then share spreadsheet to service account user
-# - Tag usage scenarios:
-#   - Override sources/targets on individual tag level using --tags arg. [done]
-#   - Explode all tags...
-# TODO: make tag/store overrides as source with previous category assignments preserved [done, except as targets]
-# TODO: prevent multiple s-tags
+Notes:
+ - About mutability: Pandas DataFrames are mutable except when they're not... I am treating them as immutable here and when necessary to make changes using return values and re-assignment. From the Pandas docs:
+    ## Mutability and copying of data
+      All pandas data structures are value-mutable (the values they contain can be altered) but not always size-mutable. The length of a Series cannot be changed, but, for example, columns can be inserted into a DataFrame.
+      However, the vast majority of methods produce new objects and leave the input data untouched. In general we like to favor immutability where sensible.
+- Permissions: Create a service account and download credentials in json format, (detailed instructions here: https://pygsheets.readthedocs.io/en/stable/authorization.html)
+               then share spreadsheet to service account user
+- Tag usage scenarios:
+  - Override sources/targets on individual tag level using --tags arg. [done]
+  - Explode all tags...
+TODO: make tag/store overrides as source with previous category assignments preserved [done, except as targets]
+TODO: prevent multiple s-tags
+"""
 
 # Define some classes =================================================================================================
-
 
 class AppSettings:
     """
@@ -43,10 +54,10 @@ class AppSettings:
     """
     def __init__(self, args):
         self.DEFAULT_START_DATE = pd.to_datetime("10/1/2022")
-        self.data_source = args.source
+        self.data_source = args.source  # A csv file or a google Sheets document containing transactions data. (In the case of the latter, a sheet name must be provided as well)
         self.audit_mode = args.audit
-        self.data_sheet = args.sheet or "current_exp"
-        self._labels_source = args.srcmap or "Sources-Targets"
+        self.data_sheet = args.sheet or "Transactions_*"  # The name (or prefix plus wildcard) of the sheet containing the transactions data (if data_source is a google Sheets document
+        self._labels_source = args.srcmap or "Sources-Targets"  # A csv file or sheet name containing sources and targets
         self.filter_dates = args.range
         self.separate_taxes = args.separate_tax
         self.verbose = args.verbose
@@ -63,11 +74,14 @@ class AppSettings:
         self.stores = None
         self.tag_override = False
         self.hover = "Category"
+        if args.verbose:
+            logger.setLevel(logging.DEBUG)
+            logger.handlers[0].setLevel(logging.DEBUG) # Assumes only one handler
         if args.hover:
             if args.hover.lower() in ["desc", "stores", "description"]:
                 self.hover = "Description"
             if args.hover == "tags":
-                print("Tags in hovertext not yet implemented!")
+                logger.warn("Tags in hovertext not yet implemented!")
             if args.hover.lower() in ["none", "no", "false"]:
                 self.hover = None
         if args.tags:
@@ -123,7 +137,7 @@ class AppSettings:
 
     @labels_source.setter
     def labels_source(self, val):
-        if not val or len(val) == 0 or not path.isfile(val):
+        if not val or len(val) == 0 or (val.endswith('.csv') and not path.isfile(val)):
             raise Exception(f"Sources-targets file not found: {val}")
         self._labels_source = val
 
@@ -136,10 +150,11 @@ class AppSettings:
     def validate_sources(self):
         # check sources etc
         if not self.data_source or len(self.data_source) == 0:
-            print("Please enter a valid data source!")
+            logger.warn("Please enter a valid data source!")
             raise Exception("Missing data source.")
 
         if self.data_source.endswith(".csv"):
+            logger.debug(f"Using csv data source: {self.data_source}")
             # Using csv data source
             # Note: additional data validation happens when loading this data
             if not self.labels_source or not self.labels_source.endswith(".csv"):
@@ -151,6 +166,7 @@ class AppSettings:
         else:
             # Using Google Sheets data source
             # Note: additional access/permissions/data validation happens when fetching and loading this data
+            logger.debug(f"Using Google Sheets data source: {self.data_source}")
             if not self.data_sheet or len(self.data_sheet) == 0:
                 raise Exception("Missing Google worksheet name.")
             if not self.labels_source or len(self.labels_source) == 0:
@@ -172,10 +188,10 @@ class RowLabels:
         self._digraph = nx.DiGraph()
         self._digraph.add_node("Income", ntype="income")
         self.process_report = f"RowLabel report\n{'='*60}\n\n\n"
-        required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Link color', 'Node color']
+        required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Classification', 'Link color', 'Node color']
         if False in [k in self._labeldata[0].keys() for k in required_columns]:
             raise Exception(f"Sources-Targets sheet does not have all required columns! Needed: {required_columns}. Found: {list(self._labeldata[0].keys())}")
-        self._available_attributes = ['source', 'target', 'link_color', 'node_color', 'type']
+        self._available_attributes = ['source', 'target', 'Classification', 'link_color', 'node_color', 'type']
         # TODO: validation
         self._lookup = {}
         # Map out data to lookup dict
@@ -187,7 +203,14 @@ class RowLabels:
                 raise Exception(f"Duplicate label! {i['Category Name']}")
             # Add to internal lookup dict
             self.process_report += f"ADDING LOOKUP: {i}\n"
-            self._lookup[i['Category Name']] = {'source': i.get('Source'), 'target': i.get('Target'), 'link_color': i.get('Link color'), 'node_color': i.get('Node color'), 'type': i.get('Type')}
+            self._lookup[i['Category Name']] = {
+                'source': i.get('Source'), 
+                'target': i.get('Target'),
+                'classification': i.get('Classification'),
+                'link_color': i.get('Link color'), 
+                'node_color': i.get('Node color'), 
+                'type': i.get('Type')
+            }
             if i.get("Source") == "DEDUCTIONS":
                 # These have to be dynamically generated - skip adding to DAG for now (or maybe entirely)
                 # TODO (maybe): switch to using type and/or DAG attributes
@@ -212,7 +235,7 @@ class RowLabels:
                     self._digraph.add_edge(i.get('Source'), i.get('Target'))
             else:
                 self.process_report += f"ERROR (SKIPPING): {i}\n"
-                print(f"Category: {i['Category Name']} yielded an empty source and/or target! {i.get('Source')}:{i.get('Target')}")
+                logger.warn(f"Category: {i['Category Name']} yielded an empty source and/or target! {i.get('Source')}:{i.get('Target')}")
 
     @property
     def data(self):
@@ -225,9 +248,9 @@ class RowLabels:
         path = [i for i in nx.all_simple_paths(self._digraph, source, target)]
         # Note path obj may contain 0 or multiple paths
         if not path or len(path) == 0:
-            print(f"No path found for {source}:{target}")
+            logger.warn(f"No path found for {source}:{target}")
         elif len(path) > 0:
-            print(f"Multiple paths found for {source}:{target}. ({path})")
+            logger.warn(f"Multiple paths found for {source}:{target}. ({path})")
         else:
             return path[0]
 
@@ -311,7 +334,7 @@ class Transactions:
         is_valid = self._validate_df()
         # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
-            print(f"Converting data in {self.length} fetched rows to datetimes...")
+            logger.info(f"Converting data in {self.length} fetched rows to datetimes...")
         self._df["Date"] = pd.to_datetime(self._df["Date"]) # Does not mutate dataframe
         if nattype.NaTType in [type(i) for i in self._df["Date"]]:
             raise Exception("Empty date found!")  # There is probably a better way to do this.
@@ -327,6 +350,7 @@ class Transactions:
 
     def _validate_df(self):
         # Validate header row
+        # WIP: port over new sources-targets column
         header_is_valid = DataRow.validate(self._df.columns.to_list(), True)
         if not header_is_valid[0]:
             raise Exception(f"Source columns failed validation! Error was: {header_is_valid[1]}")
@@ -403,7 +427,7 @@ class Transactions:
         dt_today = datetime.datetime.today()
         self.process_report += f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}\n{'-'*60}\n"
         if self._app_settings.verbose:
-            print(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
+            logger.info(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
 
         # Step 1:
         if self._app_settings.exclude_tags:
@@ -419,7 +443,7 @@ class Transactions:
                 for row_idx in rows_to_drop:
                     self.process_report += f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}\n"
                     if self._app_settings.verbose:
-                        print(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
+                        logger.info(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
                     self._df.drop(row_idx, inplace=True)
             if df_changed:
                 self._df.reset_index(inplace=True, drop=True)
@@ -427,7 +451,7 @@ class Transactions:
         # Step 2:
         if self._app_settings.distribute_amounts:
             if self._app_settings.verbose:
-                print("Distributing amounts...")
+                logger.info("Distributing amounts...")
             self.distribute_amounts()  # process report logging happens in called method
 
         # Step 3:
@@ -442,7 +466,7 @@ class Transactions:
                 start_date = self._app_settings.DEFAULT_START_DATE
             self.process_report += f"Filtering for dates from {start_date} to {end_date}\n{'-'*60}\n"
             if self._app_settings.verbose:
-                print(f"Filtering for dates from {start_date} to {end_date}")
+                logger.info(f"Filtering for dates from {start_date} to {end_date}")
             # TODO: test and find edge cases!
             self.filter_dates(start_date, end_date)
         elif not self._app_settings.all_time:
@@ -475,17 +499,17 @@ class Transactions:
         """
         self.process_report += f"Running Transactions.apply_labels(). Tags has: {self._app_settings.tags}, tag_override is {self._app_settings.tag_override} and stores has: {self._app_settings.stores}\n\n"
         if self._app_settings.tags and self._app_settings.verbose:
-            print(f"Tag search enabled: Looking for tags: {self._app_settings.tags}")
+            logger.info(f"Tag search enabled: Looking for tags: {self._app_settings.tags}")
             if self._app_settings.tag_override:
-                print("Overriding tags...")
+                logger.info("Overriding tags...")
         if self._app_settings.stores and self._app_settings.verbose:
-            print(f"Store search enabled: Looking for stores: {self._app_settings.stores}")
+            logger.info(f"Store search enabled: Looking for stores: {self._app_settings.stores}")
         if self._app_settings.verbose:
-            print(f"Applying labels for {len(self._df)} transactions")
+            logger.info(f"Applying labels for {len(self._df)} transactions")
 
         if self._app_settings.recurring:
             if self._app_settings.verbose:
-                print("Recurring transactions to be split out")  # TODO: precludes tag:recurring handling.
+                logger.info("Recurring transactions to be split out")  # TODO: precludes tag:recurring handling.
             # Add edge from Income to Recurring
             self._labels_obj._digraph.add_edge("Income", "Recurring")
 
@@ -532,7 +556,7 @@ class Transactions:
             if is_empty(v):
                 # Note: this should not happen... raise exception instead?
                 self.process_report += f"[{this_step_id}] SKIPPING empty category {self._df.loc[k]}\n"
-                print(f"Skipping empty category {self._df.loc[k]}")
+                logger.info(f"Skipping empty category {self._df.loc[k]}")
                 continue
             # Tag logic
             # TODO: test source tags
@@ -548,14 +572,14 @@ class Transactions:
                 is_deduction = True
                 self.process_report += f"[{this_step_id}] Deduction type found src:target -> {this_source}:{this_target}\n"
                 if self._app_settings.verbose:
-                    print(f"Found DEDUCTION type transaction. Set to {this_source}:{this_target}")
+                    logger.info(f"Found DEDUCTION type transaction. Set to {this_source}:{this_target}")
 
             if self._app_settings.recurring and this_source == "Income":
                 # Replace with recurring
                 this_source = "Recurring"
             # Verify base edge is in DAG
             if not self._labels_obj._digraph.has_edge(this_source, this_target):
-                print(f"Edge: {this_source}:{this_target} not found! Adding to graph.")
+                logger.info(f"Edge: {this_source}:{this_target} not found! Adding to graph.")
                 self._labels_obj._digraph.add_edge(this_source, this_target)
 
             if not is_deduction:  # For now logic around tags/stores with deductions flow is undefined - skip processing.
@@ -574,7 +598,7 @@ class Transactions:
                     if self._app_settings.recurring and tag_matches and tag_matches[0] == "Recurring":
                         raise Exception("Not double processing recurring tags!")  # TODO: handle more quietly
                     if self._app_settings.verbose:
-                        print(f"Got tag matches: {tag_matches}")
+                        logger.info(f"Got tag matches: {tag_matches}")
                     # Check for s-tags
                     # Get tag type
                     tag_type = self._labels_obj.get_attribute(tag_matches[0], "type")
@@ -605,31 +629,31 @@ class Transactions:
                         this_source = this_target
                         this_target = tag_matches[0]
                         if self._app_settings.verbose:
-                            print(f"Adding edge to graph for tag ({tag_matches}[0]): {this_source} -> {this_target}")
+                            logger.info(f"Adding edge to graph for tag ({tag_matches}[0]): {this_source} -> {this_target}")
                         # self._labels_obj._digraph.add_edge(this_source, this_target)
 
                 if store_matches:
                     this_source = this_target
                     this_target = self._df.at[k, "Description"]
                     if self._app_settings.verbose:
-                        print(f"Adding edge to graph for store ({this_name}): {this_source} -> {this_target}")
+                        logger.info(f"Adding edge to graph for store ({this_name}): {this_source} -> {this_target}")
                     # self._labels_obj._digraph.add_edge(this_source, this_target)
 
             self.process_report += f"[{this_step_id}] RESOLVED src:target for {v} -> {this_source}:{this_target}\n"
             if self._app_settings.verbose:
-                print(f"RESOLVED source/target > {this_source}:{this_target}")
+                logger.info(f"RESOLVED source/target > {this_source}:{this_target}")
             # Circuit breaker
             if is_empty(this_source) or is_empty(this_target):
                 raise Exception(f"Got empty source or target for category {v}! ({this_source}:{this_target})")
 
             # Check for final edge in DAG and add if necessary
             if not self._labels_obj._digraph.has_edge(this_source, this_target):
-                print(f"Edge: {this_source}:{this_target} not found! Adding to graph.")
+                logger.info(f"Edge: {this_source}:{this_target} not found! Adding to graph.")
                 self._labels_obj._digraph.add_edge(this_source, this_target)
 
             # Sanity check that we haven't created an orphan edge
             if not (is_deduction or tag_type == 's-tag') and "Income" not in nx.ancestors(self._labels_obj._digraph, this_target) and "Income" not in nx.descendants(self._labels_obj._digraph, this_source):
-                print(f"{self._df.loc[k]}")
+                logger.debug(f"{self._df.loc[k]}")
                 raise Exception(f"No path to \'Income\' from {this_source}:{this_target}")
 
             # Set source-target on original transaction
@@ -647,14 +671,14 @@ class Transactions:
         self.process_report += f"\n{'-'*60}\nRunning Transactions.process_rows()\n{'-'*60}\n"
         self.process_report += msg + "\n"
         if self._app_settings.verbose:
-            print(msg)
+            logger.info(msg)
         for k,v in enumerate(self._df["Source"]):
             this_row = self._df.loc[k]
             this_step_id = str(uuid4())[:8]
             is_recurring = False
             self.process_report += f"[{this_step_id}] START Processing {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | ${self._df.at[k, 'Amount']}\n"
             if self._app_settings.verbose:
-                print(f"{'-'*40}\nGot a transaction: {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']}:{self._df.at[k, 'Target']} | ${self._df.at[k, 'Amount']}\n")
+                logger.info(f"{'-'*40}\nGot a transaction: {self._df.at[k, 'Date']} | {self._df.at[k, 'Description']} | {self._df.at[k, 'Source']}:{self._df.at[k, 'Target']} | ${self._df.at[k, 'Amount']}\n")
 
             # Check for tag match(es)
             # Note currently we will only ever use the first match.
@@ -669,7 +693,7 @@ class Transactions:
             if self._app_settings.recurring and has_recurring and "Recurring" in has_recurring:
                 is_recurring = True
             if self._app_settings.verbose:
-                print(">> Processing recurring transaction")
+                logger.info(">> Processing recurring transaction")
 
             # Handle taxes
             if not is_empty(this_row["Sales Tax"], True):
@@ -733,7 +757,7 @@ class Transactions:
             if self._df.at[k, "Type"] == 'deduction':  # deduction types skip DAG processing for now
                 self.process_report += f"[{this_step_id}] SKIPPING DAG traversal, since this is a deduction type.\n"
                 if self._app_settings.verbose:
-                    print(f"Skipping DAG checks as this was a deductions type entry: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount}")
+                    logger.info(f"Skipping DAG checks as this was a deductions type entry: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount}")
                 continue
 
             # traverse graph
@@ -752,7 +776,7 @@ class Transactions:
             if not s_tag_d1:
                 self.process_report += f"[{this_step_id}] Starting to traverse DAG for {start_node} -> {end_node}\n"
                 if self._app_settings.verbose:
-                    print(f"Traversing graph for {start_node}:{end_node}...")
+                    logger.info(f"Traversing graph for {start_node}:{end_node}...")
 
                 pgroups = [i for i in nx.all_simple_edge_paths(self._labels_obj._digraph, start_node, end_node)]
                 if is_recurring:
@@ -760,7 +784,7 @@ class Transactions:
                     for g in pgroups[0]:
                         if g[0] == "Income":
                             if self._app_settings.verbose:
-                                print(f"--- Injecting Income:Recurring and Recurring:{g[1]} nodes ----")
+                                logger.info(f"--- Injecting Income:Recurring and Recurring:{g[1]} nodes ----")
                             new_groups[0].append(("Income", "Recurring"))
                             new_groups[0].append(("Recurring", g[1]))
                         else:
@@ -769,9 +793,9 @@ class Transactions:
 
                 self.process_report += f"[{this_step_id}] DAG search yielded groups: {pgroups}\n"
                 if self._app_settings.verbose:
-                    print(f"Searched DAG for {start_node} -> {end_node} and got group: {pgroups}...")
+                    logger.info(f"Searched DAG for {start_node} -> {end_node} and got group: {pgroups}...")
                 if len(pgroups) != 1:
-                    print(f"Edge paths search did not yield the expected number of groups! {pgroups}")  # Potentially an error condition. Maybe raise an exception
+                    logger.info(f"Edge paths search did not yield the expected number of groups! {pgroups}")  # Potentially an error condition. Maybe raise an exception
                 for pgroup in pgroups:
                     # Each edge path will be an array of tuples, like [(source1,target1), (source2,target2), ...]
                     # Iterate over the paths (ignoring the one that matches the original entry) and create synthetic entries for each one.
@@ -786,7 +810,7 @@ class Transactions:
                             syn_target = tag_matches[0]  # TODO: verify that this case is handled as expected
                         self.process_report += f"[{this_step_id}] ADDED: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}\n"
                         if self._app_settings.verbose:
-                            print(f"Adding synthetic entry: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}")
+                            logger.info(f"Adding synthetic entry: {this_row.Date} | {this_row.Description} | {syn_source} -> {syn_target} | ${self._df.at[k, 'Amount']}")
                         self.add_row(DataRow.create(
                             date=this_row.Date,
                             category_name=this_row.Category,
@@ -804,22 +828,22 @@ class Transactions:
     def collapse(self):
         self.process_report += f"\n{'-'*40}\nStepping into Transactions.collapse()\n{'-'*40}\n"
         if self._app_settings.verbose:
-            print("Aggregating all source-target pairs")
+            logger.info("Aggregating all source-target pairs")
         # Collapse all the pairs down for cleaner flows
         grouped_df = self._df.groupby(['Source', 'Target']).agg({'Amount': 'sum'})
         grouped_df.reset_index(inplace=True)  # Resetting an index appears to just create a new one unless the drop argument is passed in, but that's fine in this case.
         self._grouped_df = grouped_df # TODO: Review grouped_df vs _df
         if self._app_settings.verbose:
-            print(f"Collapsed {len(self._df)} transactions down to {len(self._grouped_df)}")
+            logger.info(f"Collapsed {len(self._df)} transactions down to {len(self._grouped_df)}")
 
     def create_surplus_deficit_flows(self):
         self.process_report += f"\n{'-'*40}\nStepping into Transactions.create_surplus_deficit_flows()\n{'-'*40}\n"
         if self.surplus_deficit_processed:
-            print("Surplus/deficit flows have already been processed!")
+            logger.info("Surplus/deficit flows have already been processed!")
             return
         self.surplus_deficit_processed = True
         if self._app_settings.verbose:
-            print("Computing source/deficit flows")
+            logger.info("Computing source/deficit flows")
         # Check for s-tag nodes
         node_types = nx.get_node_attributes(self._labels_obj._digraph, 'type')  # Returns a dict like: {'a': 's-tag', 'd': 's-tag, 'c': 'tag', ...}
         s_nodes = [i for i in node_types if node_types[i] == 's-tag']  # A list of s-nodes
@@ -889,7 +913,7 @@ class Transactions:
         # Will discard data outside supplied daterange... TODO: preserve original df??
 
         if self._app_settings.verbose:
-            print(f"Filtering data from {start_date} .. {end_date}...")
+            logger.info(f"Filtering data from {start_date} .. {end_date}...")
 
         if start_date is None and end_date is None:
             return  # no op.
@@ -945,7 +969,7 @@ class Transactions:
         #       current method is to just call this before filter_dates() would need to refactor to be more robust
         # TODO: handle negative values to distribute backwards (as in, a charge that represents past costs)
         if self.amount_distributions:
-            print("Amounts have already been distributed!")
+            logger.info("Amounts have already been distributed!")
             return
         self.amount_distributions = True
         self.process_report += f"{'-'*60}\nRunning Transactions.distribute_amounts()\n{'-'*60}\n"
@@ -1294,13 +1318,13 @@ def validate_date_string(input, allow_empty=False):
             match_day = int(match_obj.groups()[1])
     if match_obj:
         if not (1900 < match_year < 2100):  # Update if doing historical work!
-            print(f"Supplied year doesn\t look right: {match_year}")
+            logger.warn(f"Supplied year doesn\t look right: {match_year}")
             return False
         if not (1 <= match_month <= 12):
-            print(f"Invalid month value: {match_month}")
+            logger.warn(f"Invalid month value: {match_month}")
             return False
         if not (1 <= match_day <= 31):
-            print(f"Invalid day value: {match_day}")
+            logger.warn(f"Invalid day value: {match_day}")
             return False
         return True
     return False
@@ -1324,37 +1348,123 @@ def func_Convert_Gsheet_dates(g_timestamp, default_date):
 
 def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_src_target, service_account_credentials):
     # app_settings_obj.data_source, app_settings_obj.data_sheet, app_settings_obj.labels_source, app_settings_obj.g_creds
+    # WIP: Handle source data in mutiple sheets, eg. 1 sheet per year...
+
+    """
+        self.data_source = args.source  # A csv file or a google Sheets document containing transactions data. (In the case of the latter, a sheet name must be provided as well)
+        self.data_sheet = args.sheet or "Transactions_*"  # The name (or prefix plus wildcard) of the sheet containing the transactions data (if data_source is a google Sheets document
+        self._labels_source = args.srcmap or "Sources-Targets"  # A csv file or sheet name containing sources and targets
+    """
+    def data_source_router(filename:str, file_kind:str, gcreds, sheetname:Union[str, None]=None, gcreds_obj=None, gsheets_obj=None):
+        """
+        Look for data sources either locally or in Google Sheets. Handle wildcards expressions for multiple sheets. Return a list of filenames.
+        :param filename: A filename or wildcard expression, or None (Note: only csv files will use the wildcard expression for this value)
+        :param file_kind: "sources-targets" or "transactions"
+        :param gcreds: Google credentials object
+        :param sheetname: A sheet name or wildcard expression, or None (only applicable to Google Sheets)
+        :param gc: Google client object (optional)
+
+        Returns: {
+            "filename" -> list of strings, 
+            "sheetname" -> list of strings,
+            "filetype" -> ["csv", "gsheet"], 
+            "file_kind" -> ["sources-targets","transactions"], 
+            "gcreds_obj" -> Google credentials object",
+            "gsheets_obj" -> Google sheets object
+        }
+        """
+        file_kind = file_kind.lower()
+        if file_kind not in ["sources-targets", "transactions"]:
+            raise Exception(f"Invalid file kind: {file_kind}")
+        if filename is None:
+            filename = input(f"Enter location for {file_kind} data: ")
+            return data_source_router(filename, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        if filename.endswith(".csv"):
+            if path.isfile(filename): # Switch to pathlib?
+                return {"filename": [filename], "sheetname": [None],"filetype": "csv", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            logger.warn(f"File not found: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        if filename.endswith("*"):
+            # Wildcards on filenames only supported for csvs, Gsheets would use sheetnames for wildcard.
+            fileparts = filename.split("/")
+            filepattern = f"{fileparts[-1]}.csv"
+            if len(fileparts[0]) == 0:
+                # This must be an absolute path
+                this_dir = "/" + "/".join(fileparts[1:-1])
+            else:
+                # Possibly a relative path
+                if len(fileparts) > 1:
+                    this_dir = "./" + "/".join(fileparts[:-1])
+                else:
+                    this_dir = "."
+            dir_obj = Path(this_dir)
+            if dir_obj.is_dir():
+                files = list(dir_obj.glob(filepattern))
+                if len(files) > 0:
+                    return {"filename": [str(f) for f in files], "sheetname": [None],"filetype": "csv", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            logger.warn("No files found at: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        # If we've gotten this far, we must be looking for a Google Sheets file (late binding of the gc object to reduce calls to authorize)
+        if not gcreds_obj:
+            gcreds_obj = pygsheets.authorize(service_file=gcreds)  # trying to avoid calling this multiple times
+        if filename not in gcreds_obj.spreadsheet_titles():
+            logger.warn(f"Spreadsheet not found: {filename}")
+            return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        gsheets_obj = gcreds_obj.open(filename) # TODO: error handling.
+        if not sheetname:
+            sheetname = input(f"Enter worksheet title for spreadsheet {filename}: ")
+            return data_source_router(filename, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
+        gsheet_titles = [i.title for i in gsheets_obj.worksheets()]
+        if sheetname.endswith("*"):
+            # Wildcard handling for sheetnames
+            results = []
+            for sheet in gsheet_titles:
+                if sheet.startswith(sheetname[:-1]):
+                    results.append(sheet)
+            if len(results) > 0:
+                return {"filename": [filename], "sheetname": results, "filetype": "gsheet", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+            logger.warn(f"No spreadsheets found matching pattern: \"{sheetname}\" in Google Sheets: \"{filename}\"")
+            return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
+        if sheetname in gsheet_titles:
+            return {"filename": [filename], "sheetname": [sheetname], "filetype": "gsheet", "file_kind": file_kind, "gcreds_obj": gcreds_obj, "gsheets_obj": gsheets_obj}
+        logger.warn(f"Spreadsheet \"{sheetname}\" not found in Google Sheets: \"{filename}\"")
+        return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
+
     try:
-        if app_settings_obj.data_source.endswith(".csv"):
-            # See sample_data/expenses.csv and labels.csv for examples of data format.
-            # TODO: validation & error handling
-            if not app_settings_obj.labels_source or not app_settings_obj.labels_source.endswith('.csv'):
-                app_settings_obj.labels_source = input("Enter location for sources-targets CSV data: ")
-            if not app_settings_obj.labels_source.endswith('.csv') or not path.isfile(app_settings_obj.labels_source):
-                raise Exception(f"Supplied sources-targets file ({app_settings_obj.labels_source}) was not found or is the wrong format.")
-            if not app_settings_obj.data_source.endswith('.csv') or not path.isfile(app_settings_obj.data_source):
-                raise Exception(f"Supplied transactions file ({app_settings_obj.data_source}) was not found or is the wrong format.")
-            with open(app_settings_obj.labels_source, 'r') as f:
+        # Get sources-targets file location data
+        # See sample_data/expenses.csv and labels.csv for examples of data format.
+        # TODO: validation & error handling
+        # TODO: there should only ever be one sources-targets file, so data_source_router should handle that
+        src_target = None
+        if app_settings_obj.labels_source.endswith(".csv"):
+            src_target_file = data_source_router(app_settings_obj.labels_source, "sources-targets", app_settings_obj.g_creds, None, None, None)
+        else:
+            src_target_file = data_source_router(app_settings_obj.data_source, "sources-targets", app_settings_obj.g_creds, app_settings_obj.labels_source, None, None)
+        if src_target_file["filetype"] == "csv":
+            # Sources-targets data is returned differently than transactions data, so we need to handle it differently.
+            with open(src_target_file["filename"][0], 'r') as f:
                 dr = DictReader(f)
                 src_target = list(dr)
-            df = pd.read_csv(app_settings_obj.data_source)
         else:
-            gc = pygsheets.authorize(service_file=app_settings_obj.g_creds)
-            if app_settings_obj.data_source not in gc.spreadsheet_titles():
-                raise Exception(f"Requested spreadsheet ({app_settings_obj.data_source}) is not available to configured service account (see: '{app_settings_obj.g_creds}')")
-            sh = gc.open(app_settings_obj.data_source) # TODO: error handling
-            sh_titles = [i.title for i in sh.worksheets()]
-            if app_settings_obj.labels_source not in sh_titles:
-                raise Exception(f"Sources-Targets worksheet \'{app_settings_obj.labels_source}\' was not found in {app_settings_obj.data_source}!")
-            if app_settings_obj.data_sheet not in sh_titles:
-                raise Exception(f"Data worksheet '{app_settings_obj.data_sheet}' was not found in {app_settings_obj.data_source}!")
-            src_target = sh.worksheet_by_title(app_settings_obj.labels_source).get_all_records()  # Fetch source-target info and colors.
-            df = sh.worksheet_by_title(app_settings_obj.data_sheet).get_as_df() #value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
+            # sh = src_target_file["greds_obj"].open(src_target_file["filename"][0]) # TODO: error handling
+            src_target = src_target_file["gsheets_obj"].worksheet_by_title(src_target_file["sheetname"][0]).get_all_records()  # Fetch source-target info and colors.
+
+        # Get transactions file(s) location data
+        df = None
+        transaction_data_file = data_source_router(app_settings_obj.data_source, "transactions", app_settings_obj.g_creds, app_settings_obj.data_sheet, None, None)
+        if transaction_data_file["filetype"] == "csv":
+            # open one or multiple csv files and return a pandas dataframe
+            df = read_csv_as_df(transaction_data_file["filename"])
+        else:
+            # Open one or multiple gsheet worksheets and return a pandas dataframe
+            df = read_gsheet_as_df(transaction_data_file["sheetname"], transaction_data_file["gsheets_obj"])
+
     except Exception as e:
-        print(f"Unable to open data source: {app_settings_obj.data_source}. Please check your names and try again. Error was {e}")
+        logger.error(f"Unable to open data source: {app_settings_obj.data_source}. Please check your names and try again. Error was {e}")
         raise SystemExit
 
     # Clean up value formatting
+    df.reset_index(inplace=True,drop=True)
     df = df.transform(normalize_amounts, axis=1)
 
     is_valid = DataRow.validate(df.columns.to_list(), True)
@@ -1364,10 +1474,36 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
     return src_target, df
 
 def read_csv_as_df(csv_file):
-    if not csv_file.endswith('.csv') or not path.isfile(csv_file):
-        raise Exception(f"Supplied CSV file ({csv_file}) was not found or is the wrong format.")
-    df = pd.read_csv(csv_file)
-    return df
+    if type(csv_file) == list:
+        main_csv = csv_file[0]
+        addl_csvs = csv_file[1:]
+    else:
+        main_csv = csv_file
+        addl_csvs = []
+    if not main_csv.endswith('.csv') or not path.isfile(main_csv):
+        raise Exception(f"Supplied CSV file ({main_csv}) was not found or is the wrong format.")
+    main_df = pd.DataFrame(pd.read_csv(main_csv))
+    for i in addl_csvs:
+        if not i.endswith('.csv') or not path.isfile(i):
+            raise Exception(f"Supplied CSV file ({i}) was not found or is the wrong format.")
+        # df = df.append(pd.DataFrame(pd.read_csv(i)), ignore_index=True)
+        add_df = pd.DataFrame(pd.read_csv(i))
+        main_df = pd.concat([main_df, add_df], axis=0)
+    return main_df
+
+def read_gsheet_as_df(gsheet_file, gsheet_obj):
+    # .get_as_df(value_render=pygsheets.ValueRenderOption.UNFORMATTED_VALUE) # <-- Using unformatted value rounded decimal amounts - not sure why
+    if type(gsheet_file) == list:
+        main_sheet = gsheet_file[0]
+        addl_sheets = gsheet_file[1:]
+    else:
+        main_sheet = gsheet_file
+        addl_sheets = []
+    main_df = gsheet_obj.worksheet_by_title(main_sheet).get_as_df()
+    for i in addl_sheets:
+        add_df = gsheet_obj.worksheet_by_title(i).get_as_df()
+        main_df = pd.concat([main_df, add_df], axis=0)
+    return main_df
 
 def normalize_amounts(df_row):
     for atype in ["Amount", "Sales Tax", "Tips"]:
