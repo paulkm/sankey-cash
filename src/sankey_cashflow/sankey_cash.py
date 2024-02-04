@@ -1,7 +1,6 @@
 import pygsheets
 import pandas as pd
 import plotly.graph_objects as go
-import argparse
 import datetime
 import logging
 from os import path
@@ -74,6 +73,8 @@ class AppSettings:
         self.stores = None
         self.tag_override = False
         self.hover = "Category"
+        self.chart_resolution = None
+        self.diagram_type = "sankey"
         if args.verbose:
             logger.setLevel(logging.DEBUG)
             logger.handlers[0].setLevel(logging.DEBUG) # Assumes only one handler
@@ -84,6 +85,11 @@ class AppSettings:
                 logger.warn("Tags in hovertext not yet implemented!")
             if args.hover.lower() in ["none", "no", "false"]:
                 self.hover = None
+        if args.dtype:
+            if args.dtype.lower() in ["sankey", "line"]:
+                self.diagram_type = args.dtype.lower()
+            else:
+                logger.warn(f"Unknown diagram type: {args.dtype}")
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
@@ -331,16 +337,17 @@ class Transactions:
         self.length = len(dataframe)
         self._app_settings = app_settings_obj
         self._labels_obj = labels_obj
-        is_valid = self._validate_df()
+        is_valid = self._validate_df()   # Will throw an exception if invalid
         # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
             logger.info(f"Converting data in {self.length} fetched rows to datetimes...")
         self._df["Date"] = pd.to_datetime(self._df["Date"]) # Does not mutate dataframe
         if nattype.NaTType in [type(i) for i in self._df["Date"]]:
+            logger.critical(repr(self._df["Date"]))
             raise Exception("Empty date found!")  # There is probably a better way to do this.
         self.earliest_date = self._df["Date"].sort_values().iloc[0]  # Returns pandas._libs.tslibs.timestamps.Timestamp
         self.latest_date = self._df["Date"].sort_values().iloc[len(self._df)-1]
-        self.default_date = self.latest_date - datetime.timedelta(days=1)
+        self.default_date = self.latest_date - datetime.timedelta(days=1)  # Day before latest date in dataset.
         self.max_depth = 1
         self.tips_processed = False
         self.sales_tax_processed = False
@@ -348,7 +355,7 @@ class Transactions:
         self.amount_distributions = False
         self.process_report = f"Transactions report\n{'='*60}\n\n\n"
 
-    def _validate_df(self):
+    def _validate_df(self) -> bool:
         # Validate header row
         # WIP: port over new sources-targets column
         header_is_valid = DataRow.validate(self._df.columns.to_list(), True)
@@ -359,6 +366,7 @@ class Transactions:
         if False in amt_types:
             invalid_loc = amt_types.index(False)  # Note, only return first invalid location
             raise Exception(f"Invalid data found at row {invalid_loc}!\n {self._df.iloc[invalid_loc]}")
+        return True
 
     def audit(self, audit_data, date_range=None):
         """
@@ -413,6 +421,7 @@ class Transactions:
 
     def process(self, date_range=None):
         """
+        Process dataframe for sankey diagram
           Step 1: Drop rows based on tag exclusions
           Step 2: Split out any entries containing distributions (if feature flag is turned on)
           Step 3: Apply date filtering (if applicable)
@@ -431,22 +440,7 @@ class Transactions:
 
         # Step 1:
         if self._app_settings.exclude_tags:
-            self.process_report += f"Checking for tags to exclude: {self._app_settings.exclude_tags}\n{'-'*60}\n"
-            df_changed = False
-            rows_to_drop = []
-            for k,v in enumerate(self._df["Tags"]):
-                tag_matches = DataRow.tag_matches(v, self._app_settings.exclude_tags)  # None if either arg is None or if no matches
-                if tag_matches:
-                    df_changed = True
-                    rows_to_drop.append(self._df.index[k])
-            if df_changed and rows_to_drop:  # Do as a separate loop to avoid changing the frame as we're iterating over it.
-                for row_idx in rows_to_drop:
-                    self.process_report += f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}\n"
-                    if self._app_settings.verbose:
-                        logger.info(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
-                    self._df.drop(row_idx, inplace=True)
-            if df_changed:
-                self._df.reset_index(inplace=True, drop=True)
+            self.filter_tags(self._app_settings.exclude_tags)
 
         # Step 2:
         if self._app_settings.distribute_amounts:
@@ -483,6 +477,72 @@ class Transactions:
         self.collapse()
         # -- END Transactions.process() --
 
+    def process_line(self, date_range=None):
+        """
+          Process dataframe for line chart diagram
+          Step 1: Drop rows based on tag exclusions
+          Step 2: Split out any entries containing distributions (if feature flag is turned on)
+          Step 3: Apply date filtering (if applicable)
+          Step 4: Update transaction rows with sources and targets as defined by labels spreadsheet for all entries, modify sources/targets based on tags & store filters. Also handle recurring items.
+        """
+
+        dt_today = datetime.datetime.today()
+        self.process_report += f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}\n{'-'*60}\n"
+        if self._app_settings.verbose:
+            print(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
+
+        # Step 1:
+        if self._app_settings.exclude_tags:
+            self.filter_tags(self._app_settings.exclude_tags)
+
+        # Step 2:
+        if self._app_settings.distribute_amounts:
+            if self._app_settings.verbose:
+                print("Distributing amounts...")
+            self.distribute_amounts()  # process report logging happens in called method
+
+        # Step 3:
+        if self._app_settings.filter_dates:
+            if not date_range:
+                raise Exception("Filter dates flag was True, but no dates were passed in!")
+            start_date = date_range[0]
+            end_date = date_range[1]
+            if end_date is None and not self._app_settings.all_time:
+                end_date = dt_today
+            if start_date is None and not self._app_settings.all_time:
+                start_date = self._app_settings.DEFAULT_START_DATE
+            self.process_report += f"Filtering for dates from {start_date} to {end_date}\n{'-'*60}\n"
+            if self._app_settings.verbose:
+                print(f"Filtering for dates from {start_date} to {end_date}")
+            # TODO: test and find edge cases!
+            self.filter_dates(start_date, end_date)
+        elif not self._app_settings.all_time:
+            self.filter_dates(self._app_settings.DEFAULT_START_DATE, dt_today)
+
+        # self.update_title() # may need to use a different title block for line charts
+        # Step 4:
+        self.apply_labels()
+        # -- END Transactions.process_line() --
+
+    def filter_tags(self, tags_to_exclude):
+        # tags_to_exclude: ['tag1','tag2', ...]
+        self.process_report += f"Checking for tags to exclude: {tags_to_exclude}\n{'-'*60}\n"
+        df_changed = False
+        rows_to_drop = []
+        for k,v in enumerate(self._df["Tags"]):
+            tag_matches = DataRow.tag_matches(v, tags_to_exclude)  # None if either arg is None or if no matches
+            if tag_matches:
+                df_changed = True
+                rows_to_drop.append(self._df.index[k])
+        if df_changed and rows_to_drop:  # Do as a separate loop to avoid changing the frame as we're iterating over it.
+            for row_idx in rows_to_drop:
+                self.process_report += f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}\n"
+                if self._app_settings.verbose:
+                    print(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
+                self._df.drop(row_idx, inplace=True)
+        if df_changed:
+            self._df.reset_index(inplace=True, drop=True)
+
     def add_row(self, row_data, already_validated=False):
         idx = len(self._df)  # Could use self.length...
         if already_validated:
@@ -494,7 +554,7 @@ class Transactions:
     def apply_labels(self):
         """
           Loop through each row in dataframe, looking up source-target nodes using category names, and overriding if indicated by tags or stores flags.
-          Also add each source:target pair as an edge in a DAG.
+          Also add each source:target pair as an edge in a DAG, to be used in the sankey diagram generator to create intermediate transactions.
           NOTE: this process will not be adding intermediate transactions, but will ensure the DAG is correct so that intermediate transactions can be added later.
         """
         self.process_report += f"Running Transactions.apply_labels(). Tags has: {self._app_settings.tags}, tag_override is {self._app_settings.tag_override} and stores has: {self._app_settings.stores}\n\n"
@@ -1026,6 +1086,7 @@ class Transactions:
 
     def update_title(self):
         # TODO: add flag information to title
+        # TODO: Move to sankeyutils class
         self.title = f"{self._app_settings.base_title} ({self.earliest_date.month}/{self.earliest_date.day}/{self.earliest_date.year} - {self.latest_date.month}/{self.latest_date.day}/{self.latest_date.year})"
         if self._app_settings.distribute_amounts:
             self.title += "<br>    Multi-month transactions are being distributed"
@@ -1038,6 +1099,9 @@ class Transactions:
 
 
 class TransactionRow:
+    """
+    WIP: not in use at this time.
+    """
     def __init__(self, df, key):
         self.key = key
         self.data = {}
@@ -1067,6 +1131,7 @@ class TransactionRow:
 
 class DataRow:
     # static class - just a container for some related methods around single rows of expense data.
+    # TODO: Add Classifications?
     fields = {
         "Date": {
             "required": True,
@@ -1232,6 +1297,51 @@ class DataRow:
                 return [i for i in set(search_tags).intersection(set(this_exploded_tags))]
         return None
 
+# WIP: Move utils into separate classes
+
+class AuditUtils:
+    pass
+
+class DiagramUtils:
+    """
+    Static class, holds utility functions used for all diagram types.
+    """
+    pass
+
+class SankeyUtils(DiagramUtils):
+    """
+    Static class, holds utility functions used for generating Sankey diagrams.
+    """
+    @staticmethod
+    def update_title(transaction_obj):
+        # Mutate passed object or return a value?
+        # TODO: add flag information to title
+        transaction_obj.title = f"{transaction_obj._app_settings.base_title} ({transaction_obj.earliest_date.month}/{transaction_obj.earliest_date.day}/{transaction_obj.earliest_date.year} - {transaction_obj.latest_date.month}/{transaction_obj.latest_date.day}/{transaction_obj.latest_date.year})"
+        if transaction_obj._app_settings.distribute_amounts:
+            transaction_obj.title += "<br>    Multi-month transactions are being distributed"
+        if transaction_obj._app_settings.exclude_tags:
+            transaction_obj.title += f"<br>    Tags being excluded: {', '.join(transaction_obj._app_settings.exclude_tags)}"
+        if transaction_obj._app_settings.tags:
+            transaction_obj.title += f"<br>    Tags being used: {', '.join(transaction_obj._app_settings.tags)}"
+        if transaction_obj._app_settings.recurring:
+            transaction_obj.title += f"<br>    Recurring transactions are being split out"
+
+    @staticmethod
+    def build_dag(transaction_obj: Transactions):
+        """
+            Create directed acyclic graph of all transactions
+        """
+        if transaction_obj._app_settings.recurring:
+            if transaction_obj._app_settings.verbose:
+                print("Recurring transactions to be split out")  # TODO: precludes tag:recurring handling.
+            # Add edge from Income to Recurring
+            transaction_obj._labels_obj._digraph.add_edge("Income", "Recurring")     
+
+class LineUtils(DiagramUtils):
+    """
+    Static class, holds utility functions used for generating line charts.
+    """
+    pass
 
 # Define some helper functions ==============================================================================================
 
