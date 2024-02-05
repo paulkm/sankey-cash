@@ -197,7 +197,7 @@ class RowLabels:
         required_columns = ['Category Name', 'Type', 'Source', 'Target', 'Classification', 'Link color', 'Node color']
         if False in [k in self._labeldata[0].keys() for k in required_columns]:
             raise Exception(f"Sources-Targets sheet does not have all required columns! Needed: {required_columns}. Found: {list(self._labeldata[0].keys())}")
-        self._available_attributes = ['source', 'target', 'Classification', 'link_color', 'node_color', 'type']
+        self._available_attributes = ['source', 'target', 'classification', 'link_color', 'node_color', 'type']
         # TODO: validation
         self._lookup = {}
         # Map out data to lookup dict
@@ -309,6 +309,8 @@ class RowLabels:
                 return "Uncategorized"
             if labelattribute == "target":
                 return labelname
+            if labelattribute == "classification":
+                return 'Uncategorized'                
             if labelattribute in ["node_color", "link_color"]:
                 return default_item[labelattribute]
         return None
@@ -489,7 +491,7 @@ class Transactions:
         dt_today = datetime.datetime.today()
         self.process_report += f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}\n{'-'*60}\n"
         if self._app_settings.verbose:
-            print(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
+            logger.info(f"Processing {len(self._df)} transactions from {self._app_settings.source_data_location()}")
 
         # Step 1:
         if self._app_settings.exclude_tags:
@@ -498,7 +500,7 @@ class Transactions:
         # Step 2:
         if self._app_settings.distribute_amounts:
             if self._app_settings.verbose:
-                print("Distributing amounts...")
+                logger.info("Distributing amounts...")
             self.distribute_amounts()  # process report logging happens in called method
 
         # Step 3:
@@ -513,7 +515,7 @@ class Transactions:
                 start_date = self._app_settings.DEFAULT_START_DATE
             self.process_report += f"Filtering for dates from {start_date} to {end_date}\n{'-'*60}\n"
             if self._app_settings.verbose:
-                print(f"Filtering for dates from {start_date} to {end_date}")
+                logger.info(f"Filtering for dates from {start_date} to {end_date}")
             # TODO: test and find edge cases!
             self.filter_dates(start_date, end_date)
         elif not self._app_settings.all_time:
@@ -538,7 +540,7 @@ class Transactions:
             for row_idx in rows_to_drop:
                 self.process_report += f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}\n"
                 if self._app_settings.verbose:
-                    print(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
+                    logger.info(f"DROPPING row due to exclude tags: {self._df.loc[row_idx]}")
                 self._df.drop(row_idx, inplace=True)
         if df_changed:
             self._df.reset_index(inplace=True, drop=True)
@@ -578,7 +580,8 @@ class Transactions:
             # Get default labels defined for category from sources-targets sheet, override from data sheet if set there.
             src = this_obj._labels_obj.get_attribute(this_category_val, "source")
             tgt = this_obj._labels_obj.get_attribute(this_category_val, "target")
-            this_obj.process_report += f"[{step_id}] Found default src:target for {this_category_val} -> {src}:{tgt}\n"
+            classification = this_obj._labels_obj.get_attribute(this_category_val, "classification")
+            this_obj.process_report += f"[{step_id}] Found default src:target for {this_category_val} -> {src}:{tgt} (classification: {classification})\n"
             # Allow individual transaction rows to override label lookups
             data_override_s_t = False
             transaction_source = this_obj._df.at[this_category_key, "Source"]
@@ -604,7 +607,7 @@ class Transactions:
             if data_override_s_t:
                 this_obj.process_report += f"[{this_step_id}] Override source/target for {this_category_val} from transaction data -> {src}:{tgt}\n"
 
-            return src,tgt
+            return src,tgt,classification
 
         # MAIN LOOP ........................................................................................
 
@@ -621,7 +624,7 @@ class Transactions:
             # Tag logic
             # TODO: test source tags
 
-            this_source, this_target = get_source_target_labels(self, k, v, this_step_id)
+            this_source, this_target, this_classification = get_source_target_labels(self, k, v, this_step_id)
 
             # Handle deduction types (these go directly from a income to an expense, skipping the 'Income' category and have a variable source based on their description)
             # Use case is a transaction with income would normally be something like "My Job" -> "Income" and then a second transaction with income taxes would be "My Job" -> "Income Taxes" (skipping income category)
@@ -719,6 +722,7 @@ class Transactions:
             # Set source-target on original transaction
             self._df.at[k, "Source"] = this_source
             self._df.at[k, "Target"] = this_target
+            self._df.at[k, "Classification"] = this_classification
 
             self.process_report += f"[{this_step_id}] FINISHED processing labels\n"
 
@@ -1131,7 +1135,7 @@ class TransactionRow:
 
 class DataRow:
     # static class - just a container for some related methods around single rows of expense data.
-    # TODO: Add Classifications?
+    # The columns we expect to see in the data
     fields = {
         "Date": {
             "required": True,
@@ -1333,7 +1337,7 @@ class SankeyUtils(DiagramUtils):
         """
         if transaction_obj._app_settings.recurring:
             if transaction_obj._app_settings.verbose:
-                print("Recurring transactions to be split out")  # TODO: precludes tag:recurring handling.
+                logger.info("Recurring transactions to be split out")  # TODO: precludes tag:recurring handling.
             # Add edge from Income to Recurring
             transaction_obj._labels_obj._digraph.add_edge("Income", "Recurring")     
 
