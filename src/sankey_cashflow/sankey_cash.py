@@ -74,6 +74,8 @@ class AppSettings:
         self.tag_override = False
         self.hover = "Category"
         self.chart_resolution = None
+        self.sales_tax_classification = "Taxes"
+        self.tip_classification = "xTips"
         self.diagram_type = "sankey"
         if args.verbose:
             logger.setLevel(logging.DEBUG)
@@ -546,12 +548,16 @@ class Transactions:
             self._df.reset_index(inplace=True, drop=True)
 
     def add_row(self, row_data, already_validated=False):
-        idx = len(self._df)  # Could use self.length...
-        if already_validated:
-            self._df.loc[idx] = row_data
-        else:
-            self._df.loc[idx] = DataRow.validate(row_data)
-        self.length = idx + 1
+        try:
+            idx = len(self._df)  # Could use self.length...
+            if already_validated:
+                self._df.loc[idx] = row_data
+            else:
+                self._df.loc[idx] = DataRow.validate(row_data)
+            self.length = idx + 1
+        except Exception as e:
+            logger.error(f"Error adding row: {row_data} - {e}")
+            import pdb; pdb.set_trace()
 
     def apply_labels(self):
         """
@@ -719,7 +725,7 @@ class Transactions:
                 logger.debug(f"{self._df.loc[k]}")
                 raise Exception(f"No path to \'Income\' from {this_source}:{this_target}")
 
-            # Set source-target on original transaction
+            # Set source-target + classification on original transaction
             self._df.at[k, "Source"] = this_source
             self._df.at[k, "Target"] = this_target
             self._df.at[k, "Classification"] = this_classification
@@ -773,7 +779,8 @@ class Transactions:
                         description=this_row.Description,
                         tags=this_row.Tags,
                         comment='Synthetic row for sales tax',
-                        distribution=this_row.Distribution
+                        distribution=this_row.Distribution,
+                        classification=self._app_settings.sales_tax_classification
                     ), True)
                 else:
                     # Create new sales tax child target from this original target row & add sales tax back to original row amount
@@ -789,7 +796,8 @@ class Transactions:
                             description=this_row.Description,
                             tags=this_row.Tags,
                             comment='Synthetic row for sales tax',
-                            distribution=this_row.Distribution
+                            distribution=this_row.Distribution,
+                            classification=self._app_settings.sales_tax_classification
                         ), True)
                         self._df.at[k, "Amount"] = round(this_row.Amount + this_row["Sales Tax"], 2)  # For this to behave as expected, it needs to add the sales tax amount back to the original Amount
                         self.process_report += f"[{this_step_id}] UPDATED: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${this_row.Amount} -> ${self._df.at[k, 'Amount']}\n"
@@ -809,7 +817,8 @@ class Transactions:
                     description=this_row.Description,
                     tags=this_row.Tags,
                     comment='Synthetic row for tips',
-                    distribution=this_row.Distribution
+                    distribution=this_row.Distribution,
+                    classification=self._app_settings.tip_classification
                 ), True)
                 self._df.at[k, "Amount"] = round(orig_amount + this_row["Tips"], 2)  # For this to behave as expected, it needs to add the tips amount back to the original Amount
                 self.process_report += f"[{this_step_id}] UPDATED: {this_row.Date} | {this_row.Description} | {this_row.Source} -> {this_row.Target} | ${orig_amount} -> ${self._df.at[k, 'Amount']}\n"
@@ -884,7 +893,8 @@ class Transactions:
                             description=this_row.Description,
                             tags=this_row.Tags,
                             comment='Synthetic row',
-                            distribution=this_row.Distribution
+                            distribution=this_row.Distribution,
+                            classification="Uncategorized"
                         ), True)
 
             self.process_report += f"[{this_step_id}] DONE processing.\n{'-'*40}\n"
@@ -1080,7 +1090,8 @@ class Transactions:
                         f"Synthetic transaction from original transaction on {original_date} of {original_amount[0]} (+{original_amount[1]})",
                         self._df.at[k, "Tags"],
                         self._df.at[k, "Type"],
-                        0
+                        0,
+                        self._df.at[k, "Classification"]
                     ))
                     counter -= 1
                 for row in dists:
@@ -1091,7 +1102,7 @@ class Transactions:
     def update_title(self):
         # TODO: add flag information to title
         # TODO: Move to sankeyutils class
-        self.title = f"{self._app_settings.base_title} ({self.earliest_date.month}/{self.earliest_date.day}/{self.earliest_date.year} - {self.latest_date.month}/{self.latest_date.day}/{self.latest_date.year})"
+        self.title = f"{self._app_settings.base_title} ({self.earliest_date.month}/{self.earliest_date.day}/{self.earliest_date.year} - {self.latest_date.month}/{self.latest_date.day}/{self.latest_date.year}) [{(self.latest_date-self.earliest_date).days} days]"
         if self._app_settings.distribute_amounts:
             self.title += "<br>    Multi-month transactions are being distributed"
         if self._app_settings.exclude_tags:
@@ -1225,8 +1236,11 @@ class DataRow:
     }
 
     @staticmethod
-    def validate(drow, header_only=False):
+    def validate(drow, header_only=False, include_classifications=False):
         # Validate that data rows are correct
+        this_fields = DataRow.fields
+        if include_classifications:
+            this_fields["Classification"] = {"required": True, "nullable": False, "type": str, "force_type": False, "comment": ""}  # Add classification to the fields
         if len(drow) != len(DataRow.fields):
             raise Exception(f"Data rows should contain {len(DataRow.fields)} elements")
         if header_only:
@@ -1258,7 +1272,7 @@ class DataRow:
         return drow
 
     @staticmethod
-    def create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="", row_type="", distribution=0):
+    def create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0, comment="", tags="", row_type="", distribution=0, classification="Uncategorized"):
         if is_null(amount):
             amount = 0
         else:
@@ -1287,7 +1301,7 @@ class DataRow:
                 sales_tax = float(sales_tax)
             except ValueError:
                 sales_tax = 0
-        return DataRow.validate([date, category_name, description, tags, comment, source, target, row_type, distribution, amount, sales_tax, tips])
+        return DataRow.validate([date, category_name, description, tags, comment, source, target, row_type, distribution, amount, sales_tax, tips, classification], False, True)
 
     @staticmethod
     def tag_matches(row_tags, search_tags):
