@@ -1305,13 +1305,13 @@ def validate_date_string(input, allow_empty=False):
     # Pandas will accept YYYY-MM-DD or MM/DD/YYYY
     if is_empty(input, True) and allow_empty:
         return True
-    match_obj = re.match("^([\d]{4})-([\d]{1,2})-([\d]{1,2})$", input)
+    match_obj = re.match(r"^([\d]{4})-([\d]{1,2})-([\d]{1,2})$", input)
     if match_obj:
         match_year = int(match_obj.groups()[0])
         match_month = int(match_obj.groups()[1])
         match_day = int(match_obj.groups()[2])
     else:
-        match_obj = re.match("^([\d]{1,2})/([\d]{1,2})/([\d]{4})$", input)
+        match_obj = re.match(r"^([\d]{1,2})/([\d]{1,2})/([\d]{4})$", input)
         if match_obj:
             match_year = int(match_obj.groups()[2])
             match_month = int(match_obj.groups()[0])
