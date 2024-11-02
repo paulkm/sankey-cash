@@ -1,16 +1,29 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {file = "src/VERSION"}
+# requires = ["hatchling"]
+# build-backend = "hatchling.build"
 
 [project]
 name = "sankey_cashflow"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
   { name="Paul Marcontell", email="paul.marcontell@gmail.com" },
 ]
 description = "Some classes for generating cashflow sankey diagrams"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.7"
+dependencies = [
+    "pygsheets",
+    "pandas",
+    "plotly",
+    "numpy",
+    "networkx"
+  ]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
