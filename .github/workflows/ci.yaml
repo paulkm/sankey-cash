@@ -43,7 +43,7 @@ jobs:
         pip install genbadge defusedxml
         genbadge coverage -i coverage.xml -o htmlcov/coverage-badge.svg
     - name: list files in htmlcov
-      run: ls htmlcov
+      run: ls /home/runner/work/sankey-cash/sankey-cash/htmlcov
     - name: Write coverage to gh-pages
       if: success() || failure()
       uses: JamesIves/github-pages-deploy-action@v4
@@ -72,7 +72,7 @@ jobs:
       if: github.event_name == 'push' #  && github.ref == 'refs/heads/main'
       shell: bash
       run: |
-        echo -n ${{ github.sha }} | cut -c1-8 > src/VERSION
+        echo -n ${{ github.sha }} > src/VERSION
     - name: Update version
       if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')
       shell: bash
