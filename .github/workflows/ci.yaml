@@ -30,8 +30,15 @@ jobs:
         coverage report
         coverage xml
         coverage html
-  
-  # TODO: coverage badges
+    - name: Generate badges
+      run: |
+        pip install genbadge defusedxml
+        genbadge coverage --input coverage.xml --output htmlcov/coverage.svg
+    - name: Write coverage to gh-pages
+      uses: JamesIves/github-pages-deploy-action@v4
+      with:
+        branch: gh-pages
+        folder: htmlcov
 
   build:
     name: Build distribution 🔨
@@ -50,6 +57,11 @@ jobs:
         pip install
         build
         --user
+    - name: Update version
+      if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      run: |
+        echo ${{ github.event.release.tag_name }} > src/VERSION
     - name: Build a binary wheel and a source tarball
       run: python3 -m build
     - name: Store the distribution packages
@@ -61,7 +73,8 @@ jobs:
   publish-to-pypi:
     name: >-
       Publish distribution 📦 to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    #if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')  # Only push on tagged releases
     needs:
     - build
     runs-on: ubuntu-latest

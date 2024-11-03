@@ -4,8 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 version = {file = "src/VERSION"}
-# requires = ["hatchling"]
-# build-backend = "hatchling.build"
 
 [project]
 name = "sankey-cash"
@@ -18,11 +16,11 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.7"
 dependencies = [
-    "pygsheets",
-    "pandas",
-    "plotly",
-    "numpy",
-    "networkx"
+    "pygsheets ~= 2.0",
+    "pandas ~= 1.5",
+    "plotly ~= 5.11",
+    "numpy ~= 1.24",
+    "networkx ~= 2.8"
   ]
 classifiers = [
     "Programming Language :: Python :: 3",
