@@ -33,7 +33,7 @@ jobs:
     - name: Generate badges
       run: |
         pip install genbadge defusedxml
-        genbadge coverage --input coverage.xml --output htmlcov/coverage.svg
+        genbadge coverage -i coverage.xml -o htmlcov/coverage-badge.svg
     - name: Write coverage to gh-pages
       uses: JamesIves/github-pages-deploy-action@v4
       with:
