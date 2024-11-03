@@ -8,7 +8,7 @@ version = {file = "src/VERSION"}
 # build-backend = "hatchling.build"
 
 [project]
-name = "sankey_cashflow"
+name = "sankey-cash"
 dynamic = ["version"]
 authors = [
   { name="Paul Marcontell", email="paul.marcontell@gmail.com" },
