@@ -42,8 +42,8 @@ jobs:
       run: |
         pip install genbadge defusedxml
         genbadge coverage -i coverage.xml -o htmlcov/coverage-badge.svg
-    - name: Check gitignore
-      run: cat /home/runner/work/sankey-cash/sankey-cash/.gitignore
+    - name: Remove gitignore from coverage
+      run: rm -f htmlcov/.gitignore
     - name: Write coverage to gh-pages
       if: success() || failure()
       uses: JamesIves/github-pages-deploy-action@v4

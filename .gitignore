@@ -6,6 +6,3 @@ venv
 *.idea
 *.bak
 *.egg-info
-# .coverage
-# coverage.xml
-# htmlcov
