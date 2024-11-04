@@ -2,6 +2,7 @@
 
 ## Information
 Classes for manipulating columnar transaction data so it can be displayed as a sankey diagram.
+[![Test coverage](https://paulkm.github.io/sankey-cash/coverage-badge.svg?raw=true)](https://paulkm.github.io/sankey-cash/)
 
 ## Installation
 - `pip install sankey-cash`

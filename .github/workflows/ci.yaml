@@ -1,12 +1,11 @@
 name: Publish to PyPI and TestPyPI
 # Following: https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
 
-on: push
-# TODO: verify if main build will trigger on this
-# on:
-#   push:
-#     branches:
-#       - main
+# on: push
+on:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -70,10 +69,10 @@ jobs:
         build
         --user
     - name: Update version
-      if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/')
       shell: bash
       run: |
-        echo -n ${{ github.event.release.tag_name }} > src/VERSION
+        echo -n ${{ github.ref_name }} > src/VERSION
     - name: Build a binary wheel and a source tarball
       run: python3 -m build
     - name: Store the distribution packages
@@ -85,8 +84,8 @@ jobs:
   publish-to-pypi:
     name: >-
       Publish distribution 📦 to PyPI
-    #if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
-    if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')  # Only push on tagged releases
+    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    # if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/')  # Only push on tagged releases
     needs:
     - build
     runs-on: ubuntu-latest
