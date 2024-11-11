@@ -20,7 +20,8 @@ dependencies = [
     "pandas ~= 1.5",
     "plotly ~= 5.11",
     "numpy ~= 1.24",
-    "networkx ~= 2.8"
+    "networkx ~= 2.8",
+    "matplotlib"
   ]
 classifiers = [
     "Programming Language :: Python :: 3",
