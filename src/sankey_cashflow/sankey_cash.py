@@ -125,18 +125,18 @@ class AppSettings:
         return self._date_filter_start
 
     @date_filter_start.setter
-    def date_filter_start(self, val:str) -> None:
+    def date_filter_start(self, val: str) -> None:
         if not val or len(val) == 0:
             self._date_filter_start = None
         else:
             self._date_filter_start = pd.to_datetime(val)
 
     @property
-    def date_filter_end(self)-> Union[pd.Timestamp, None]:
+    def date_filter_end(self) -> Union[pd.Timestamp, None]:
         return self._date_filter_end
 
     @date_filter_end.setter
-    def date_filter_end(self, val:str) -> None:
+    def date_filter_end(self, val: str) -> None:
         if not val or len(val) == 0:
             self._date_filter_end = None
         else:
@@ -147,7 +147,7 @@ class AppSettings:
         return self._g_creds
 
     @g_creds.setter
-    def g_creds(self, val:str) -> None:
+    def g_creds(self, val: str) -> None:
         if not val or len(val) == 0 or not path.isfile(val):
             raise Exception(f"Credentials file not found: {val}")
         self._g_creds = val
@@ -157,7 +157,7 @@ class AppSettings:
         return self._labels_source
 
     @labels_source.setter
-    def labels_source(self, val:str) -> None:
+    def labels_source(self, val: str) -> None:
         if not val or len(val) == 0 or (val.endswith('.csv') and not path.isfile(val)):
             raise Exception(f"Sources-targets file not found: {val}")
         self._labels_source = val
@@ -206,7 +206,7 @@ class RowLabels:
         'Link color': 'rgba(153, 187, 255, 0.8)', 'Node color': 'rgba(102, 153, 255, 1)', 'Comments': '', '': ''}]
       Also creates a DAG with source target edges based on labels definitions
     """
-    def __init__(self, labeldata:list[dict]):
+    def __init__(self, labeldata: list[dict]):
         self._labeldata = labeldata
         self._digraph = nx.DiGraph()
         self._digraph.add_node("Income", ntype="income")
@@ -270,7 +270,7 @@ class RowLabels:
     def get_longest_path(self) -> ArrayLike:
         return nx.dag_longest_path(self._digraph)
 
-    def get_path(self, source:str, target:str) -> Union[list, None]:
+    def get_path(self, source: str, target: str) -> Union[list, None]:
         path = [i for i in nx.all_simple_paths(self._digraph, source, target)]
         # Note path obj may contain 0 or multiple paths
         if not path or len(path) == 0:
@@ -280,7 +280,7 @@ class RowLabels:
         else:
             return path[0]
 
-    def get_label(self, labelname:str, labeltype:Union[str,None]=None) -> Union[tuple[str, str], None]:
+    def get_label(self, labelname: str, labeltype: Union[str, None] = None) -> Union[tuple[str, str], None]:
         """
           Return a label name & tag pair or None
         """
@@ -300,11 +300,11 @@ class RowLabels:
         return None
 
     def get_attribute(self,
-                      labelname:str,
-                      labelattribute:str,
-                      use_default:Optional[bool]=True,
-                      labeltype:Optional[Union[str, None]]=None,
-                      original_category:Optional[Union[str, None]]=None) -> Union[str, None]:
+                      labelname: str,
+                      labelattribute: str,
+                      use_default: Optional[bool] = True,
+                      labeltype: Optional[Union[str, None]] = None,
+                      original_category: Optional[Union[str, None]] = None) -> Union[str, None]:
         """
           Get named attribute by label. Cases:
             Unknown attribute: raise exception
@@ -340,7 +340,7 @@ class RowLabels:
                 return default_item[labelattribute]
         return None
 
-    def print_graph(self, filename:str) -> None:
+    def print_graph(self, filename: str) -> None:
         from matplotlib import pyplot as plt
         plt.tight_layout()
         nx.draw_networkx(self._digraph, arrows=True)
@@ -395,7 +395,7 @@ class Transactions:
             raise Exception(f"Invalid data found at row {invalid_loc}!\n {self._df.iloc[invalid_loc]}")
         return True
 
-    def audit(self, audit_data:pd.DataFrame, date_range:Optional[Union[tuple[str,str], None]]=None) -> str:
+    def audit(self, audit_data: pd.DataFrame, date_range: Optional[Union[tuple[str, str], None]] = None) -> str:
         """
             Compare transaction data to audit data. Note this is specifically set up to use the column format for my
                 bank export data. YMMV.
@@ -1506,7 +1506,7 @@ class LineUtils(DiagramUtils):
 # Define some helper functions =======================================================================================
 
 
-def is_null(obj:any) -> bool:
+def is_null(obj: any) -> bool:
     # Just using numpy.isnan() will throw errors for types that cannot be coerced to float64.
     # Could also use a try...catch
     # use as a general purpose null/none/NaN catch
@@ -1526,7 +1526,7 @@ def is_null(obj:any) -> bool:
     return False
 
 
-def is_empty(obj:any, nonzero:Optional[bool]=False) -> bool:
+def is_empty(obj: any, nonzero: Optional[bool] = False) -> bool:
     # Check for null, nan, none, etc as well as empty string. Optionally check for zero values.
     # Swallow errors casting to values
     if is_null(obj):
@@ -1648,7 +1648,7 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
             gcreds_obj=None,
             gsheets_obj=None):
         """
-        Calls itself recursively, looking for data sources either locally or in Google Sheets. 
+        Calls itself recursively, looking for data sources either locally or in Google Sheets.
             Handle wildcards expressions for multiple sheets.
             Return a dict containing a list of filenames.
         :param filename: A filename or wildcard expression, or None (Note: only csv files will use the wildcard
