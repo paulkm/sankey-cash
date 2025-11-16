@@ -1648,7 +1648,7 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
             gcreds_obj=None,
             gsheets_obj=None):
         """
-        Calls itself recursively, looking for data sources either locally or in Google Sheets.
+        Calls itself recursively, looking for data sources either locally or in Google Sheets and returns the first hit.
             Handle wildcards expressions for multiple sheets.
             Return a dict containing a list of filenames.
         :param filename: A filename or wildcard expression, or None (Note: only csv files will use the wildcard
