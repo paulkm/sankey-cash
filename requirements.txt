@@ -1,5 +1,1 @@
-pygsheets
-pandas
-plotly
-numpy
-networkx
+-e .
