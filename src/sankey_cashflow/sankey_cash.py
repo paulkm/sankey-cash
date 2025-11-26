@@ -5,6 +5,7 @@ import datetime
 import logging
 from os import path
 from numpy import isnan, float64
+from numpy.typing import ArrayLike
 from csv import DictReader
 import re
 import networkx as nx
@@ -12,7 +13,7 @@ from uuid import uuid4
 from pathlib import Path
 # Types
 from pandas._libs.tslibs import timestamps, nattype
-from typing import List, Dict, Tuple, Union, Optional
+from typing import List, Dict, Tuple, Union, Optional  # no longer needed >3.9?
 
 logger = logging.getLogger(__name__)
 ConsoleOutputHandler = logging.StreamHandler()
@@ -58,6 +59,7 @@ class AppSettings:
       Application settings and defaults + validation, getters/setters, etc
     """
     def __init__(self, args):
+        # args will be from argparser
         self.DEFAULT_START_DATE = pd.to_datetime("10/1/2022")
         # A csv file or a google Sheets document containing transactions data.
         # (In the case of the latter, a sheet name must be provided as well)
@@ -95,14 +97,14 @@ class AppSettings:
             if args.hover.lower() in ["desc", "stores", "description"]:
                 self.hover = "Description"
             if args.hover == "tags":
-                logger.warn("Tags in hovertext not yet implemented!")
+                logger.warning("Tags in hovertext not yet implemented!")
             if args.hover.lower() in ["none", "no", "false"]:
                 self.hover = None
         if args.dtype:
             if args.dtype.lower() in ["sankey", "line"]:
                 self.diagram_type = args.dtype.lower()
             else:
-                logger.warn(f"Unknown diagram type: {args.dtype}")
+                logger.warning(f"Unknown diagram type: {args.dtype}")
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
@@ -119,57 +121,57 @@ class AppSettings:
         self.validate_sources()
 
     @property
-    def date_filter_start(self):
+    def date_filter_start(self) -> Union[pd.Timestamp, None]:
         return self._date_filter_start
 
     @date_filter_start.setter
-    def date_filter_start(self, val):
+    def date_filter_start(self, val: str) -> None:
         if not val or len(val) == 0:
             self._date_filter_start = None
         else:
             self._date_filter_start = pd.to_datetime(val)
 
     @property
-    def date_filter_end(self):
+    def date_filter_end(self) -> Union[pd.Timestamp, None]:
         return self._date_filter_end
 
     @date_filter_end.setter
-    def date_filter_end(self, val):
+    def date_filter_end(self, val: str) -> None:
         if not val or len(val) == 0:
             self._date_filter_end = None
         else:
             self._date_filter_end = pd.to_datetime(val)
 
     @property
-    def g_creds(self):
+    def g_creds(self) -> str:
         return self._g_creds
 
     @g_creds.setter
-    def g_creds(self, val):
+    def g_creds(self, val: str) -> None:
         if not val or len(val) == 0 or not path.isfile(val):
             raise Exception(f"Credentials file not found: {val}")
         self._g_creds = val
 
     @property
-    def labels_source(self):
+    def labels_source(self) -> str:
         return self._labels_source
 
     @labels_source.setter
-    def labels_source(self, val):
+    def labels_source(self, val: str) -> None:
         if not val or len(val) == 0 or (val.endswith('.csv') and not path.isfile(val)):
             raise Exception(f"Sources-targets file not found: {val}")
         self._labels_source = val
 
-    def source_data_location(self):
+    def source_data_location(self) -> str:
         if self.data_source.endswith('.csv'):
             return self.data_source
         else:
             return f"{self.data_source}: {self.data_sheet}"
 
-    def validate_sources(self):
+    def validate_sources(self) -> None:
         # check sources etc
         if not self.data_source or len(self.data_source) == 0:
-            logger.warn("Please enter a valid data source!")
+            logger.warning("Please enter a valid data source!")
             raise Exception("Missing data source.")
 
         if self.data_source.endswith(".csv"):
@@ -204,7 +206,7 @@ class RowLabels:
         'Link color': 'rgba(153, 187, 255, 0.8)', 'Node color': 'rgba(102, 153, 255, 1)', 'Comments': '', '': ''}]
       Also creates a DAG with source target edges based on labels definitions
     """
-    def __init__(self, labeldata):
+    def __init__(self, labeldata: list[dict]):
         self._labeldata = labeldata
         self._digraph = nx.DiGraph()
         self._digraph.add_node("Income", ntype="income")
@@ -258,27 +260,27 @@ class RowLabels:
                     self._digraph.add_edge(i.get('Source'), i.get('Target'))
             else:
                 self.process_report += f"ERROR (SKIPPING): {i}\n"
-                logger.warn(f"Category: {i['Category Name']} yielded an empty source and/or target! \
+                logger.warning(f"Category: {i['Category Name']} yielded an empty source and/or target! \
                             {i.get('Source')}:{i.get('Target')}")
 
     @property
-    def data(self):
+    def data(self) -> list[dict]:
         return self._labeldata
 
-    def get_longest_path(self):
+    def get_longest_path(self) -> ArrayLike:
         return nx.dag_longest_path(self._digraph)
 
-    def get_path(self, source, target):
+    def get_path(self, source: str, target: str) -> Union[list, None]:
         path = [i for i in nx.all_simple_paths(self._digraph, source, target)]
         # Note path obj may contain 0 or multiple paths
         if not path or len(path) == 0:
-            logger.warn(f"No path found for {source}:{target}")
-        elif len(path) > 0:
-            logger.warn(f"Multiple paths found for {source}:{target}. ({path})")
+            logger.warning(f"No path found for {source}:{target}")
+        elif len(path) > 1:
+            logger.warning(f"Multiple paths found for {source}:{target}. ({path})")
         else:
             return path[0]
 
-    def get_label(self, labelname, labeltype=None):
+    def get_label(self, labelname: str, labeltype: Union[str, None] = None) -> Union[tuple[str, str], None]:
         """
           Return a label name & tag pair or None
         """
@@ -297,7 +299,12 @@ class RowLabels:
             return item
         return None
 
-    def get_attribute(self, labelname, labelattribute, use_default=True, labeltype=None, original_category=None):
+    def get_attribute(self,
+                      labelname: str,
+                      labelattribute: str,
+                      use_default: Optional[bool] = True,
+                      labeltype: Optional[Union[str, None]] = None,
+                      original_category: Optional[Union[str, None]] = None) -> Union[str, None]:
         """
           Get named attribute by label. Cases:
             Unknown attribute: raise exception
@@ -333,7 +340,7 @@ class RowLabels:
                 return default_item[labelattribute]
         return None
 
-    def print_graph(self, filename):
+    def print_graph(self, filename: str) -> None:
         from matplotlib import pyplot as plt
         plt.tight_layout()
         nx.draw_networkx(self._digraph, arrows=True)
@@ -388,7 +395,7 @@ class Transactions:
             raise Exception(f"Invalid data found at row {invalid_loc}!\n {self._df.iloc[invalid_loc]}")
         return True
 
-    def audit(self, audit_data, date_range=None):
+    def audit(self, audit_data: pd.DataFrame, date_range: Optional[Union[tuple[str, str], None]] = None) -> str:
         """
             Compare transaction data to audit data. Note this is specifically set up to use the column format for my
                 bank export data. YMMV.
@@ -430,6 +437,7 @@ class Transactions:
 
         # Step 2
         rowsums = self._df.apply(safe_sum, axis=1)
+        # import pdb; pdb.set_trace()
 
         # Step 3
         for idx, row in audit_data.iterrows():
@@ -774,6 +782,7 @@ class Transactions:
                 raise Exception(f"No path to \'Income\' from {this_source}:{this_target}")
 
             # Set source-target + classification on original transaction
+            # DEBUG: this is where classification is being set
             self._df.at[k, "Source"] = this_source
             self._df.at[k, "Target"] = this_target
             self._df.at[k, "Classification"] = this_classification
@@ -1330,7 +1339,7 @@ class DataRow:
     @staticmethod
     def validate(drow, header_only=False, include_classifications=False):
         # Validate that data rows are correct
-        this_fields = DataRow.fields
+        this_fields = DataRow.fields.copy()  # prevent mutation of the class fields
         if include_classifications:
             # Add classification to the fields
             this_fields["Classification"] = {
@@ -1340,16 +1349,17 @@ class DataRow:
                 "force_type": False,
                 "comment": ""
             }
-        if len(drow) != len(DataRow.fields):
+        if len(drow) != len(this_fields):
+            # import pdb; pdb.set_trace()
             raise Exception(f"Data rows should contain {len(DataRow.fields)} elements")
         if header_only:
-            if drow != list(DataRow.fields.keys()):
-                return False, f"Data rows need to be in the form: {list(DataRow.fields.keys())}"
+            if drow != list(this_fields.keys()):
+                return False, f"Data rows need to be in the form: {list(this_fields.keys())}"
             return True, None
-        vkeys = list(DataRow.fields.keys())
+        vkeys = list(this_fields.keys())
         counter = 0
         while counter < len(drow):
-            this_validator = DataRow.fields[vkeys[counter]]
+            this_validator = this_fields[vkeys[counter]]  # TODO: verify if this needs a copy
             this_value = drow[counter]
             counter += 1
             if is_null(this_value):  # Also check for length = 0?
@@ -1496,7 +1506,7 @@ class LineUtils(DiagramUtils):
 # Define some helper functions =======================================================================================
 
 
-def is_null(obj):
+def is_null(obj: any) -> bool:
     # Just using numpy.isnan() will throw errors for types that cannot be coerced to float64.
     # Could also use a try...catch
     # use as a general purpose null/none/NaN catch
@@ -1516,7 +1526,7 @@ def is_null(obj):
     return False
 
 
-def is_empty(obj, nonzero=False):
+def is_empty(obj: any, nonzero: Optional[bool] = False) -> bool:
     # Check for null, nan, none, etc as well as empty string. Optionally check for zero values.
     # Swallow errors casting to values
     if is_null(obj):
@@ -1570,8 +1580,11 @@ def save_report(report_data, basename):
 
 def validate_date_string(input, allow_empty=False):
     # Pandas will accept YYYY-MM-DD or MM/DD/YYYY
-    if is_empty(input, True) and allow_empty:
-        return True
+    if is_empty(input, True):
+        if allow_empty:
+            return True
+        else:
+            raise Exception("Date string cannot be empty!")
     match_obj = re.match(r"^([\d]{4})-([\d]{1,2})-([\d]{1,2})$", input)
     if match_obj:
         match_year = int(match_obj.groups()[0])
@@ -1585,13 +1598,13 @@ def validate_date_string(input, allow_empty=False):
             match_day = int(match_obj.groups()[1])
     if match_obj:
         if not (1900 < match_year < 2100):  # Update if doing historical work!
-            logger.warn(f"Supplied year doesn\t look right: {match_year}")
+            logger.warning(f"Supplied year doesn\t look right: {match_year}")
             return False
         if not (1 <= match_month <= 12):
-            logger.warn(f"Invalid month value: {match_month}")
+            logger.warning(f"Invalid month value: {match_month}")
             return False
         if not (1 <= match_day <= 31):
-            logger.warn(f"Invalid day value: {match_day}")
+            logger.warning(f"Invalid day value: {match_day}")
             return False
         return True
     return False
@@ -1635,8 +1648,9 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
             gcreds_obj=None,
             gsheets_obj=None):
         """
-        Look for data sources either locally or in Google Sheets. Handle wildcards expressions for multiple sheets.
-            Return a list of filenames.
+        Calls itself recursively, looking for data sources either locally or in Google Sheets and returns the first hit.
+            Handle wildcards expressions for multiple sheets.
+            Return a dict containing a list of filenames.
         :param filename: A filename or wildcard expression, or None (Note: only csv files will use the wildcard
             expression for this value)
         :param file_kind: "sources-targets" or "transactions"
@@ -1668,7 +1682,7 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
                     "file_kind": file_kind,
                     "gcreds_obj": gcreds_obj,
                     "gsheets_obj": gsheets_obj}
-            logger.warn(f"File not found: {filename}")
+            logger.warning(f"File not found: {filename}")
             return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
         if filename.endswith("*"):
             # Wildcards on filenames only supported for csvs, Gsheets would use sheetnames for wildcard.
@@ -1693,14 +1707,14 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
                             "file_kind": file_kind,
                             "gcreds_obj": gcreds_obj,
                             "gsheets_obj": gsheets_obj}
-            logger.warn("No files found at: {filename}")
+            logger.warning("No files found at: {filename}")
             return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
         # If we've gotten this far, we must be looking for a Google Sheets file (late binding of the
         # gc object to reduce calls to authorize)
         if not gcreds_obj:
             gcreds_obj = pygsheets.authorize(service_file=gcreds)  # trying to avoid calling this multiple times
         if filename not in gcreds_obj.spreadsheet_titles():
-            logger.warn(f"Spreadsheet not found: {filename}")
+            logger.warning(f"Spreadsheet not found: {filename}")
             return data_source_router(None, file_kind, gcreds, sheetname, gcreds_obj, gsheets_obj)
         gsheets_obj = gcreds_obj.open(filename)  # TODO: error handling.
         if not sheetname:
@@ -1721,7 +1735,7 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
                     "file_kind": file_kind,
                     "gcreds_obj": gcreds_obj,
                     "gsheets_obj": gsheets_obj}
-            logger.warn(f"No spreadsheets found matching pattern: \"{sheetname}\" in Google Sheets: \"{filename}\"")
+            logger.warning(f"No spreadsheets found matching pattern: \"{sheetname}\" in Google Sheets: \"{filename}\"")
             return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
         if sheetname in gsheet_titles:
             return {"filename": [filename],
@@ -1730,7 +1744,7 @@ def fetch_data(app_settings_obj):  # source_spreadsheet, source_worksheet, csv_s
                     "file_kind": file_kind,
                     "gcreds_obj": gcreds_obj,
                     "gsheets_obj": gsheets_obj}
-        logger.warn(f"Spreadsheet \"{sheetname}\" not found in Google Sheets: \"{filename}\"")
+        logger.warning(f"Spreadsheet \"{sheetname}\" not found in Google Sheets: \"{filename}\"")
         return data_source_router(filename, file_kind, gcreds, None, gcreds_obj, gsheets_obj)
 
     try:
