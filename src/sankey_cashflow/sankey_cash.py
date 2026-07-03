@@ -1,6 +1,5 @@
 import pygsheets
 import pandas as pd
-import plotly.graph_objects as go
 import datetime
 import logging
 from os import path
@@ -13,7 +12,7 @@ from uuid import uuid4
 from pathlib import Path
 # Types
 from pandas._libs.tslibs import timestamps, nattype
-from typing import List, Dict, Tuple, Union, Optional  # no longer needed >3.9?
+from typing import Union, Optional
 
 logger = logging.getLogger(__name__)
 ConsoleOutputHandler = logging.StreamHandler()
@@ -364,7 +363,7 @@ class Transactions:
         self.length = len(dataframe)
         self._app_settings = app_settings_obj
         self._labels_obj = labels_obj
-        is_valid = self._validate_df()   # Will throw an exception if invalid
+        self._validate_df()   # Will throw an exception if invalid
         # Convert all dates to datetimes and sort earliest to latest
         if self._app_settings.verbose:
             logger.info(f"Converting data in {self.length} fetched rows to datetimes...")
@@ -1023,7 +1022,7 @@ class Transactions:
                         category_name=f"{s_node} Surplus",
                         amount=surplus,
                         source=s_node,
-                        target=f"Income",
+                        target="Income",
                         comment=f"Synthetic {s_node} surplus entry"
                     ), True)
                 else:
@@ -1117,7 +1116,6 @@ class Transactions:
     def explode_tags(self):
         # Split each tag out to its own column, with true/false value for a given row
         # Note: currently unused but possible future functionality around tags.
-        result = {}
         unique_df_tags = [val.strip() for sublist in self._df["Tags"].str.split(",").tolist() for val in sublist]
         unique_df_tags = list(set(unique_df_tags))
         if '' in unique_df_tags:
@@ -1220,7 +1218,7 @@ class Transactions:
         if self._app_settings.tags:
             self.title += f"<br>    Tags being used: {', '.join(self._app_settings.tags)}"
         if self._app_settings.recurring:
-            self.title += f"<br>    Recurring transactions are being split out"
+            self.title += "<br>    Recurring transactions are being split out"
 
 
 class TransactionRow:
@@ -1451,8 +1449,6 @@ class DataRow:
     def tag_matches(row_tags, search_tags):
         # Tag logic
         this_exploded_tags = None
-        this_tag_matches = None
-        this_store_matches = False
         if search_tags and not is_empty(search_tags) and not is_empty(row_tags):
             this_exploded_tags = [i.strip() for i in row_tags.split(',')]  # TODO: Do this case insensitively?
             if this_exploded_tags:
@@ -1492,7 +1488,7 @@ class SankeyUtils(DiagramUtils):
         if transaction_obj._app_settings.tags:
             transaction_obj.title += f"<br>    Tags being used: {', '.join(transaction_obj._app_settings.tags)}"
         if transaction_obj._app_settings.recurring:
-            transaction_obj.title += f"<br>    Recurring transactions are being split out"
+            transaction_obj.title += "<br>    Recurring transactions are being split out"
 
     @staticmethod
     def build_dag(transaction_obj: Transactions):
@@ -1528,7 +1524,7 @@ def is_null(obj: any) -> bool:
     obj_as_str = None
     try:
         obj_as_str = str(obj)
-    except Exception as e:
+    except Exception:
         pass
     if obj_as_str in ["None", "none", "NaN", "nan", "Null", "null"]:
         return True
@@ -1543,7 +1539,7 @@ def is_empty(obj: any, nonzero: Optional[bool] = False) -> bool:
     obj_as_str = None
     try:
         obj_as_str = str(obj)
-    except Exception as e:
+    except Exception:
         pass
     if obj_as_str == "":
         return True
@@ -1551,7 +1547,7 @@ def is_empty(obj: any, nonzero: Optional[bool] = False) -> bool:
         obj_as_float = None  # int() truncates values like 0.25 to 0
         try:
             obj_as_float = float(obj)
-        except Exception as e:
+        except Exception:
             pass
         if obj_as_float == 0:
             return True
@@ -1568,13 +1564,11 @@ def df_date_filter(df, start_date, end_date):
         df = df[df["Date"] >= start_date]
     else:
         df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
-    df.reset_index(drop=True)
+    df = df.reset_index(drop=True)
     if len(df) == 0:
         # TODO: this will error if start_date or end_date are not dates
         raise Exception(f"Supplied date range ({start_date.date()} - {end_date.date()}) does not contain any \
                         transactions!")
-    earliest_date = df["Date"].sort_values().iloc[0]
-    latest_date = df["Date"].sort_values().iloc[len(df) - 1]
     return df
 
 
