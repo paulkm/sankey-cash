@@ -29,6 +29,12 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "coverage",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/paulkm/sankey-cash"
 "Bug Tracker" = "https://github.com/paulkm/sankey-cash/issues"
