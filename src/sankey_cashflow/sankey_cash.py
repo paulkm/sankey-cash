@@ -591,8 +591,7 @@ class Transactions:
             self.length = idx + 1
         except Exception as e:
             logger.error(f"Error adding row: {row_data} - {e}")
-            import pdb
-            pdb.set_trace()
+            raise
 
     def apply_labels(self):
         """
@@ -1176,7 +1175,14 @@ class Transactions:
                     # create(date, category_name, source, target, amount, description="", sales_tax=0, tips=0,
                     #   comment="", tags="", row_type="", distribution=0):
                     # Assuming no tips on distributed transactions for now
-                    dists.append(DataRow.create(
+                    # NOTE: distribute_amounts() runs before apply_labels() in Transactions.process(), so the
+                    # "Classification" column (which apply_labels() creates) may not exist yet. Fall back to the
+                    # same "Uncategorized" default DataRow.create() itself uses, and trim it back off the row if
+                    # the dataframe doesn't have that column yet - apply_labels() will add it for every row
+                    # (including this synthetic one) once it runs.
+                    has_classification_col = "Classification" in self._df.columns
+                    classification = self._df.at[k, "Classification"] if has_classification_col else "Uncategorized"
+                    new_row = DataRow.create(
                         new_date,
                         self._df.at[k, "Category"],
                         self._df.at[k, "Source"],
@@ -1190,8 +1196,11 @@ class Transactions:
                         self._df.at[k, "Tags"],
                         self._df.at[k, "Type"],
                         0,
-                        self._df.at[k, "Classification"]
-                    ))
+                        classification
+                    )
+                    if not has_classification_col:
+                        new_row = new_row[:-1]  # Match the dataframe's current column count
+                    dists.append(new_row)
                     counter -= 1
                 for row in dists:
                     self._df.loc[df_idx] = row  # Add check_data_row here?

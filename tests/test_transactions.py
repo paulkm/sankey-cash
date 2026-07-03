@@ -359,12 +359,11 @@ class TestFilterDates:
 
 class TestDistributeAmounts:
     """
-    NOTE: distribute_amounts() reads self._df.at[k, "Classification"], but that column is only
-    ever created by apply_labels(). In Transactions.process() distribute_amounts() (step 2) runs
-    BEFORE apply_labels() (step 4), so this column does not actually exist yet at that point in
-    real usage - see the "distribute_amounts column ordering" finding reported separately.
-    These tests set the column directly to unit test this method's own splitting logic in
-    isolation; they do not assert anything about the real process() call order being safe.
+    In Transactions.process(), distribute_amounts() (step 2) always runs BEFORE apply_labels()
+    (step 4), so the "Classification" column apply_labels() creates does not exist yet at this
+    point in real usage. These tests deliberately do NOT pre-create that column, matching real
+    call order - this is a regression test for a bug where distribute_amounts() crashed
+    unconditionally whenever a distributed row was processed before apply_labels() had run.
     """
 
     def test_forward_distribution_splits_amount_and_dates(self, make_transactions_df, tag_row_labels, make_args):
@@ -372,7 +371,6 @@ class TestDistributeAmounts:
             [{'Date': '2023-01-01', 'Category': 'Gas', 'Amount': 120.0, 'Distribution': 3}],
             tag_row_labels, make_transactions_df, make_args
         )
-        txn._df['Classification'] = 'Uncategorized'
         txn.distribute_amounts()
         assert len(txn._df) == 3
         assert all(txn._df['Amount'] == 40.0)
@@ -386,7 +384,6 @@ class TestDistributeAmounts:
             [{'Date': '2023-03-01', 'Category': 'Gas', 'Amount': 90.0, 'Distribution': -3}],
             tag_row_labels, make_transactions_df, make_args
         )
-        txn._df['Classification'] = 'Uncategorized'
         txn.distribute_amounts()
         assert len(txn._df) == 3
         dates = txn._df['Date'].tolist()
@@ -397,7 +394,6 @@ class TestDistributeAmounts:
             [{'Date': '2023-01-01', 'Category': 'Gas', 'Amount': 120.0, 'Distribution': 3, 'Sales Tax': 12.0}],
             tag_row_labels, make_transactions_df, make_args
         )
-        txn._df['Classification'] = 'Uncategorized'
         txn.distribute_amounts()
         assert all(txn._df['Sales Tax'] == 4.0)
 
@@ -406,11 +402,26 @@ class TestDistributeAmounts:
             [{'Date': '2023-01-01', 'Category': 'Gas', 'Amount': 120.0, 'Distribution': 3}],
             tag_row_labels, make_transactions_df, make_args
         )
-        txn._df['Classification'] = 'Uncategorized'
         txn.distribute_amounts()
         assert len(txn._df) == 3
         txn.distribute_amounts()
         assert len(txn._df) == 3
+
+    def test_distribution_before_apply_labels_does_not_crash(self, make_transactions_df, tag_row_labels, make_args):
+        # Regression test matching the real Transactions.process() call order: distribute_amounts()
+        # before apply_labels(), with no "Classification" column present yet on either the original
+        # or the synthetic rows it creates.
+        txn = _transactions_for(
+            [{'Date': '2023-01-01', 'Category': 'Gas', 'Amount': 90.0, 'Distribution': 3}],
+            tag_row_labels, make_transactions_df, make_args
+        )
+        assert 'Classification' not in txn._df.columns
+        txn.distribute_amounts()
+        assert 'Classification' not in txn._df.columns
+        assert len(txn._df) == 3
+        txn.apply_labels()
+        assert 'Classification' in txn._df.columns
+        assert all(txn._df['Classification'].notna())
 
     def test_no_distribution_rows_untouched(self, sample_transactions):
         original_len = len(sample_transactions._df)
