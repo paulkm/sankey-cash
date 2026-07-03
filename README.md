@@ -2,9 +2,12 @@
 
 ## Information
 Classes for manipulating columnar transaction data so it can be displayed as a sankey diagram.
+[![Test coverage](https://paulkm.github.io/sankey-cash/coverage-badge.svg?raw=true)](https://paulkm.github.io/sankey-cash/)
 
 ## Installation
-- `pip install __TBD__`
+- `pip install sankey-cash`
+- From testpy: `python3 -m pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple sankey-cash`
+- `from sankey_cashflow import sankey_cash as scash`
 
 ## Dev/test install
 - `git clone git@github.com:paulkm/sankey-cash.git`
