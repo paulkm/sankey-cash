@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from sankey_cashflow.sankey_cash import RowLabels, Transactions
+from sankey_cashflow import RowLabels, Transactions
 
 
 class TestInit:
@@ -90,7 +90,7 @@ def tag_row_labels(tag_labels_data):
 
 
 def _transactions_for(df_rows, row_labels, make_transactions_df, make_args, **settings_overrides):
-    from sankey_cashflow.sankey_cash import AppSettings
+    from sankey_cashflow import AppSettings
     df = make_transactions_df(df_rows)
     settings = AppSettings(make_args(**settings_overrides))
     return Transactions(df, row_labels, settings)

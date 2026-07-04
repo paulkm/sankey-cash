@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from sankey_cashflow.sankey_cash import AppSettings
+from sankey_cashflow import AppSettings
 
 
 class TestDefaultInitialization:

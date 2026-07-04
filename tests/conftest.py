@@ -1,6 +1,6 @@
 import pytest
 
-from sankey_cashflow.sankey_cash import AppSettings, RowLabels, Transactions
+from sankey_cashflow import AppSettings, RowLabels, Transactions
 import pandas as pd
 
 
