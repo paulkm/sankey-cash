@@ -17,6 +17,7 @@ Notes:
   then share the spreadsheet with the service account user.
 """
 
+from .cli import main
 from .data_row import DataRow
 from .diagram import build_line_figure, build_sankey_figure
 from .io import fetch_data, read_csv_as_df, read_gsheet_as_df
@@ -42,6 +43,7 @@ __all__ = [
     "read_gsheet_as_df",
     "build_sankey_figure",
     "build_line_figure",
+    "main",
     "is_null",
     "is_empty",
     "df_date_filter",
