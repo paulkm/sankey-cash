@@ -5,6 +5,7 @@ on:
     types:
       - opened
       - reopened
+      - synchronize
     branches:
       - main
 
@@ -22,7 +23,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.x"
+        python-version: "3.13"
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -45,7 +46,6 @@ jobs:
     - name: Remove gitignore from coverage
       run: rm -f htmlcov/.gitignore
     - name: Write coverage to gh-pages
-      if: success() || failure()
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages
@@ -62,7 +62,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.x"
+        python-version: "3.13"
     - name: Install pypa/build
       run: >-
         python3 -m
