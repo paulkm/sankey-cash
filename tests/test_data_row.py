@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from sankey_cashflow.sankey_cash import DataRow
+from sankey_cashflow import DataRow
 
 
 @pytest.fixture
@@ -52,14 +52,14 @@ class TestValidate:
 
     def test_validate_header_only_correct_order(self):
         header = ['Date', 'Category', 'Description', 'Tags', 'Comments', 'Source', 'Target',
-                   'Type', 'Distribution', 'Amount', 'Sales Tax', 'Tips']
+                  'Type', 'Distribution', 'Amount', 'Sales Tax', 'Tips']
         result, error = DataRow.validate(header, header_only=True)
         assert result is True
         assert error is None
 
     def test_validate_header_only_wrong_order(self):
         header = ['Category', 'Date', 'Description', 'Tags', 'Comments', 'Source', 'Target',
-                   'Type', 'Distribution', 'Amount', 'Sales Tax', 'Tips']
+                  'Type', 'Distribution', 'Amount', 'Sales Tax', 'Tips']
         result, error = DataRow.validate(header, header_only=True)
         assert result is False
         assert error is not None

@@ -1,7 +1,6 @@
-import pandas as pd
 import pytest
 
-from sankey_cashflow.sankey_cash import read_csv_as_df, fetch_data, DataRow
+from sankey_cashflow import read_csv_as_df, fetch_data, DataRow
 
 
 class TestReadCsvAsDf:

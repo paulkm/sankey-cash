@@ -1,9 +1,7 @@
-from pathlib import Path
-
 import networkx as nx
 import pytest
 
-from sankey_cashflow.sankey_cash import RowLabels
+from sankey_cashflow import RowLabels
 
 
 class TestInit:

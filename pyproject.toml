@@ -11,7 +11,7 @@ dynamic = ["version"]
 authors = [
   { name="Paul Marcontell", email="paul.marcontell@gmail.com" },
 ]
-description = "Some classes for generating cashflow sankey diagrams"
+description = "Generate configurable Sankey or line diagrams of cashflow from transaction data"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.7"
@@ -34,6 +34,9 @@ test = [
     "pytest",
     "coverage",
 ]
+
+[project.scripts]
+sankeyd = "sankey_cashflow.cli:main"
 
 [project.urls]
 "Homepage" = "https://github.com/paulkm/sankey-cash"

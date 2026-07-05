@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from sankey_cashflow.sankey_cash import (
+from sankey_cashflow import (
     is_null,
     is_empty,
     validate_date_string,
