@@ -121,6 +121,37 @@ def validate_date_string(input, allow_empty=False):
     return False
 
 
+_RESOLUTION_PRESETS = ("day", "week", "month", "quarter", "year")
+_RESOLUTION_MULTIPLIER_RE = re.compile(r"^(\d+)\s*(day|week|month)s?$")
+
+
+def normalize_chart_resolution(value: str) -> Optional[str]:
+    """
+      Parse a --resolution value into a canonical form used by both AppSettings (validation) and
+      diagram.py (mapping to a pandas resample frequency): one of the named presets ("day",
+      "week", "month", "quarter", "year"), or an explicit multiple of day/week/month expressed as
+      eg "3month" (spaces/plural "months" are accepted on input - "3 months" also parses - but the
+      canonical form dropped here is always space-free and singular). Returns None if `value`
+      doesn't match any of these forms.
+
+      "1 month" (etc) collapses to the "month" preset rather than "1month", since they're
+      equivalent and callers (eg AppSettings default-comparisons) shouldn't need to know both
+      spellings exist.
+    """
+    if is_empty(value):
+        return None
+    v = value.strip().lower()
+    if v in _RESOLUTION_PRESETS:
+        return v
+    match = _RESOLUTION_MULTIPLIER_RE.match(v)
+    if match:
+        n, unit = int(match.group(1)), match.group(2)
+        if n <= 0:
+            return None
+        return unit if n == 1 else f"{n}{unit}"
+    return None
+
+
 def normalize_amounts(df_row):
     for atype in ["Amount", "Sales Tax", "Tips"]:
         val = df_row[atype]

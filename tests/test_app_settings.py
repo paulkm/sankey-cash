@@ -28,10 +28,15 @@ class TestDefaultInitialization:
         assert settings.stores is None
         assert settings.tag_override is False
         assert settings.hover == 'Category'
-        assert settings.chart_resolution is None
+        assert settings.chart_resolution == 'week'
         assert settings.sales_tax_classification == 'Taxes'
         assert settings.tip_classification == 'xTips'
         assert settings.diagram_type == 'sankey'
+        assert settings.trend_mode == 'percent'
+        assert settings.trend_baseline == 'trimmed-mean'
+        assert settings.trend_trim == 5.0
+        assert settings.trend_category is None
+        assert settings.trend_outlier_tag == 'Outlier'
         assert settings.colors == {}
 
     def test_verbose_logging(self, make_args):
@@ -58,7 +63,7 @@ class TestHoverOption:
 
 class TestDiagramType:
 
-    @pytest.mark.parametrize('dtype_arg,expected', [('sankey', 'sankey'), ('line', 'line'), ('LINE', 'line')])
+    @pytest.mark.parametrize('dtype_arg,expected', [('sankey', 'sankey'), ('trend', 'trend'), ('TREND', 'trend')])
     def test_recognized_dtype(self, make_args, dtype_arg, expected):
         settings = AppSettings(make_args(dtype=dtype_arg))
         assert settings.diagram_type == expected
@@ -66,6 +71,64 @@ class TestDiagramType:
     def test_unrecognized_dtype_keeps_default(self, make_args):
         settings = AppSettings(make_args(dtype='pie'))
         assert settings.diagram_type == 'sankey'
+
+
+class TestChartResolution:
+
+    @pytest.mark.parametrize('resolution_arg,expected', [
+        ('day', 'day'), ('week', 'week'), ('MONTH', 'month'), ('quarter', 'quarter'), ('YEAR', 'year'),
+        ('3 months', '3month'), ('3months', '3month'), ('1 month', 'month'), ('6 weeks', '6week'),
+    ])
+    def test_recognized_resolution(self, make_args, resolution_arg, expected):
+        settings = AppSettings(make_args(resolution=resolution_arg))
+        assert settings.chart_resolution == expected
+
+    @pytest.mark.parametrize('resolution_arg', ['fortnight', '0 months', '-1 week', '   '])
+    def test_unrecognized_resolution_keeps_default(self, make_args, resolution_arg):
+        settings = AppSettings(make_args(resolution=resolution_arg))
+        assert settings.chart_resolution == 'week'
+
+
+class TestTrendOptions:
+
+    @pytest.mark.parametrize('mode_arg,expected', [
+        ('dollars', 'dollars'), ('percent', 'percent'), ('PERCENT', 'percent')
+    ])
+    def test_recognized_trend_mode(self, make_args, mode_arg, expected):
+        settings = AppSettings(make_args(trend_mode=mode_arg))
+        assert settings.trend_mode == expected
+
+    def test_unrecognized_trend_mode_keeps_default(self, make_args):
+        settings = AppSettings(make_args(trend_mode='logarithmic'))
+        assert settings.trend_mode == 'percent'
+
+    @pytest.mark.parametrize('baseline_arg,expected', [
+        ('mean', 'mean'), ('median', 'median'), ('trimmed-mean', 'trimmed-mean'), ('MEAN', 'mean')
+    ])
+    def test_recognized_trend_baseline(self, make_args, baseline_arg, expected):
+        settings = AppSettings(make_args(trend_baseline=baseline_arg))
+        assert settings.trend_baseline == expected
+
+    def test_unrecognized_trend_baseline_keeps_default(self, make_args):
+        settings = AppSettings(make_args(trend_baseline='mode'))
+        assert settings.trend_baseline == 'trimmed-mean'
+
+    def test_trend_trim_parses_float(self, make_args):
+        settings = AppSettings(make_args(trend_trim='10'))
+        assert settings.trend_trim == 10.0
+
+    @pytest.mark.parametrize('bad_trim', ['not-a-number', '-1', '50', '100'])
+    def test_trend_trim_out_of_range_keeps_default(self, make_args, bad_trim):
+        settings = AppSettings(make_args(trend_trim=bad_trim))
+        assert settings.trend_trim == 5.0
+
+    def test_trend_category_split_and_stripped(self, make_args):
+        settings = AppSettings(make_args(trend_category=' Auto , Housing Exp '))
+        assert settings.trend_category == ['Auto', 'Housing Exp']
+
+    def test_trend_outlier_tag_override(self, make_args):
+        settings = AppSettings(make_args(trend_outlier_tag='Skip'))
+        assert settings.trend_outlier_tag == 'Skip'
 
 
 class TestTagsStoresExclude:

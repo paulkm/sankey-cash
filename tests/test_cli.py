@@ -26,6 +26,12 @@ class TestBuildArgParser:
         assert args.recurring is False
         assert args.hover is None
         assert args.dtype is None
+        assert args.resolution is None
+        assert args.trend_mode is None
+        assert args.trend_baseline is None
+        assert args.trend_trim is None
+        assert args.trend_category is None
+        assert args.trend_outlier_tag is None
 
     def test_parses_source_and_srcmap(self):
         args = build_arg_parser().parse_args(['-s', 'data.csv', '--srcmap', 'labels.csv'])
@@ -50,15 +56,28 @@ class TestBuildArgParser:
     def test_parses_string_options(self):
         args = build_arg_parser().parse_args([
             '--tags', 'Ford, Dodge', '--exclude', 'Onetime', '--stores', "Trader Joe's",
-            '--hover', 'Description', '--dtype', 'line', '--creds', 'creds.json', '-t', 'Sheet1'
+            '--hover', 'Description', '--dtype', 'trend', '--creds', 'creds.json', '-t', 'Sheet1'
         ])
         assert args.tags == 'Ford, Dodge'
         assert args.exclude == 'Onetime'
         assert args.stores == "Trader Joe's"
         assert args.hover == 'Description'
-        assert args.dtype == 'line'
+        assert args.dtype == 'trend'
         assert args.creds == 'creds.json'
         assert args.sheet == 'Sheet1'
+
+    def test_parses_trend_options(self):
+        args = build_arg_parser().parse_args([
+            '--dtype', 'trend', '--resolution', 'month', '--trend-mode', 'dollars',
+            '--trend-baseline', 'median', '--trend-trim', '10', '--trend-category', 'Auto, Housing Exp',
+            '--trend-outlier-tag', 'Skip'
+        ])
+        assert args.resolution == 'month'
+        assert args.trend_mode == 'dollars'
+        assert args.trend_baseline == 'median'
+        assert args.trend_trim == '10'
+        assert args.trend_category == 'Auto, Housing Exp'
+        assert args.trend_outlier_tag == 'Skip'
 
 
 class TestMainEndToEnd:
@@ -77,14 +96,23 @@ class TestMainEndToEnd:
         ])
         assert shown == [True]
 
-    def test_main_runs_line_pipeline(self, monkeypatch):
+    def test_main_runs_trend_pipeline(self, monkeypatch):
         monkeypatch.setattr(cli_module, 'save_report', lambda *a, **kw: None)
-        monkeypatch.setattr('builtins.input', lambda *a, **kw: 'week')
         shown = []
         monkeypatch.setattr('plotly.graph_objects.Figure.show', lambda self, *a, **kw: shown.append(True))
         cli_module.main([
             '--source', 'sample_data/expenses.csv', '--srcmap', 'sample_data/labels.csv', '--all_time',
-            '--dtype', 'line'
+            '--dtype', 'trend'
+        ])
+        assert shown == [True]
+
+    def test_main_runs_trend_pipeline_dollar_mode(self, monkeypatch):
+        monkeypatch.setattr(cli_module, 'save_report', lambda *a, **kw: None)
+        shown = []
+        monkeypatch.setattr('plotly.graph_objects.Figure.show', lambda self, *a, **kw: shown.append(True))
+        cli_module.main([
+            '--source', 'sample_data/expenses.csv', '--srcmap', 'sample_data/labels.csv', '--all_time',
+            '--dtype', 'trend', '--trend-mode', 'dollars', '--resolution', 'day'
         ])
         assert shown == [True]
 

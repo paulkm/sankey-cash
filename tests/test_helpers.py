@@ -6,6 +6,7 @@ from sankey_cashflow import (
     is_empty,
     validate_date_string,
     normalize_amounts,
+    normalize_chart_resolution,
     df_date_filter,
 )
 
@@ -105,6 +106,27 @@ class TestNormalizeAmounts:
         result = normalize_amounts(row)
         assert result['Sales Tax'] == ''
         assert result['Tips'] is None
+
+
+class TestNormalizeChartResolution:
+
+    @pytest.mark.parametrize('value,expected', [
+        ('day', 'day'), ('week', 'week'), ('month', 'month'), ('quarter', 'quarter'), ('year', 'year'),
+        ('DAY', 'day'), ('Quarter', 'quarter'), (' week ', 'week'),
+    ])
+    def test_named_presets(self, value, expected):
+        assert normalize_chart_resolution(value) == expected
+
+    @pytest.mark.parametrize('value,expected', [
+        ('3 months', '3month'), ('3months', '3month'), ('3month', '3month'),
+        ('6 weeks', '6week'), ('10 days', '10day'), ('1 month', 'month'), ('1 week', 'week'),
+    ])
+    def test_explicit_multiples(self, value, expected):
+        assert normalize_chart_resolution(value) == expected
+
+    @pytest.mark.parametrize('value', ['0 months', '-1 week', 'fortnight', '', None, '   ', '3 years', '3 quarters'])
+    def test_invalid_values_return_none(self, value):
+        assert normalize_chart_resolution(value) is None
 
 
 class TestDfDateFilter:

@@ -3,7 +3,7 @@ import datetime
 
 import pandas as pd
 
-from .diagram import build_line_figure, build_sankey_figure
+from .diagram import build_sankey_figure, build_trend_figure
 from .io import fetch_data, read_csv_as_df
 from .labels import RowLabels
 from .settings import AppSettings
@@ -35,7 +35,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audit", help="Audit source data transactions for missing items", action="store_true")
     parser.add_argument("--recurring", help="Split recurring expenses out", action="store_true")
     parser.add_argument("--hover", help="Grouping field for hover text. Defaults to 'Category'")
-    parser.add_argument("--dtype", help="Diagram type to generate (sankey, line). Defaults to 'sankey'")
+    parser.add_argument("--dtype", help="Diagram type to generate (sankey, trend). Defaults to 'sankey'")
+    parser.add_argument("--resolution", help="Chart resolution for the trend diagram type: day, week, month, "
+                        "quarter, year, or an explicit multiple like '3 months'. Defaults to 'week'")
+    parser.add_argument("--trend-mode", dest="trend_mode",
+                        help="Trend diagram Y-axis mode: 'percent' (deviation from each classification's own "
+                        "baseline, comparable across differently-sized categories) or 'dollars' (raw amounts, "
+                        "best for a single classification). Defaults to 'percent'.")
+    parser.add_argument("--trend-baseline", dest="trend_baseline",
+                        help="Baseline strategy used by trend --trend-mode=percent (mean, median, trimmed-mean). "
+                        "Defaults to 'trimmed-mean'.")
+    parser.add_argument("--trend-trim", dest="trend_trim",
+                        help="Percent to trim from each end (highest/lowest datapoints) before averaging, when "
+                        "--trend-baseline=trimmed-mean. Defaults to 5.")
+    parser.add_argument("--trend-category", dest="trend_category",
+                        help="Comma delimited list of Classifications to restrict the trend diagram to, eg "
+                        "'Housing Exp, Auto'. Defaults to all (non-hidden) classifications.")
+    parser.add_argument("--trend-outlier-tag", dest="trend_outlier_tag",
+                        help="Tag used to manually exclude a transaction from trend analysis entirely (baseline "
+                        "and plotted values). Defaults to 'Outlier'.")
     return parser
 
 
@@ -71,12 +89,6 @@ def main(argv=None):
         # Doing this first, as it involves user input - throw any errors related to that before fetching data.
         date_range = _prompt_for_date_range(app_settings)
 
-    if app_settings.diagram_type == 'line':
-        chart_resolution = input("Enter chart resolution (day, week, month): ")
-        while chart_resolution not in ['day', 'week', 'month']:
-            chart_resolution = input("Invalid chart resolution! Enter chart resolution (day, week, month): ")
-        app_settings.chart_resolution = chart_resolution
-
     if app_settings.verbose:
         logger.info(f"Fetching data from {app_settings.data_source}: {app_settings.data_sheet}...")
     src_target, df = fetch_data(app_settings)
@@ -98,8 +110,8 @@ def main(argv=None):
 
     if app_settings.diagram_type == 'sankey':
         transactions_data.process(date_range)
-    elif app_settings.diagram_type == 'line':
-        transactions_data.process_line(date_range)
+    elif app_settings.diagram_type == 'trend':
+        transactions_data.process_trend(date_range)
     else:
         print(f"Invalid diagram type: {app_settings.diagram_type}")
         raise SystemExit(1)
@@ -112,7 +124,7 @@ def main(argv=None):
     if app_settings.diagram_type == 'sankey':
         fig = build_sankey_figure(transactions_data, sources_targets, app_settings)
     else:
-        fig = build_line_figure(transactions_data, app_settings)
+        fig = build_trend_figure(transactions_data, app_settings)
     fig.show()
 
 

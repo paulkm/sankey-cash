@@ -1,13 +1,13 @@
 import pytest
 
-from sankey_cashflow import read_csv_as_df, fetch_data, DataRow
+from sankey_cashflow import AppSettings, read_csv_as_df, fetch_data, DataRow
 
 
 class TestReadCsvAsDf:
 
     def test_reads_single_csv(self):
         df = read_csv_as_df('sample_data/expenses.csv')
-        assert len(df) == 33
+        assert len(df) == 817
         assert list(df.columns) == [
             'Date', 'Category', 'Description', 'Tags', 'Comments', 'Source', 'Target',
             'Type', 'Distribution', 'Amount', 'Sales Tax', 'Tips'
@@ -41,7 +41,7 @@ class TestFetchData:
         assert isinstance(src_target, list)
         assert len(src_target) > 0
         assert 'Category Name' in src_target[0]
-        assert len(df) == 33
+        assert len(df) == 817
 
     def test_amount_column_normalized_to_float(self, default_app_settings):
         _, df = fetch_data(default_app_settings)
@@ -53,3 +53,39 @@ class TestFetchData:
         _, df = fetch_data(default_app_settings)
         is_valid = DataRow.validate(df.columns.to_list(), True)
         assert is_valid[0] is True
+
+
+class TestMultiYearWildcardSource:
+    """
+    Covers the stretch goal from .localdev/FEATURE_TRENDS.md: multi-year trend analysis via a
+    wildcard --source, eg 'Transactions_*' matching one csv per year (Transactions_2023.csv,
+    Transactions_2024.csv, ...), the same convention used for --sheet against Google Sheets.
+    """
+
+    cols = 'Date,Category,Description,Tags,Comments,Source,Target,Type,Distribution,Amount,Sales Tax,Tips\n'
+
+    def _write_year_csv(self, tmp_path, year, amount):
+        (tmp_path / f'Transactions_{year}.csv').write_text(
+            self.cols + f'1/15/{year},Groceries,Store,,,,,,,{amount},,\n'
+        )
+
+    def test_wildcard_source_concatenates_multiple_years(self, tmp_path, make_args):
+        self._write_year_csv(tmp_path, 2023, '10.00')
+        self._write_year_csv(tmp_path, 2024, '20.00')
+        settings = AppSettings(make_args(
+            source=str(tmp_path / 'Transactions_*'), srcmap='sample_data/labels.csv', all_time=True
+        ))
+        _, df = fetch_data(settings)
+        assert len(df) == 2
+        assert sorted(df['Date'].tolist()) == ['1/15/2023', '1/15/2024']
+        assert sorted(df['Amount'].tolist()) == [10.0, 20.0]
+
+    def test_wildcard_source_passes_app_settings_validation(self, tmp_path, make_args):
+        # Regression: validate_sources() used to only recognize a csv source ending in literal
+        # ".csv", so a wildcard csv source like "Transactions_*" fell through to the Google
+        # Sheets validation branch and demanded credentials/a sheet name it didn't need.
+        self._write_year_csv(tmp_path, 2023, '10.00')
+        settings = AppSettings(make_args(
+            source=str(tmp_path / 'Transactions_*'), srcmap='sample_data/labels.csv', all_time=True
+        ))
+        assert settings.source_data_location() == str(tmp_path / 'Transactions_*')

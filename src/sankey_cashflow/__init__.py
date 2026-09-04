@@ -1,6 +1,6 @@
 """
 sankey-cash: transforms columnar transaction data (CSV or Google Sheets) into cashflow graph
-data, and renders it as a Sankey diagram or a line chart via plotly.
+data, and renders it as a Sankey diagram or a trend chart via plotly.
 
 See README.md for usage instructions and examples.
 
@@ -19,7 +19,7 @@ Notes:
 
 from .cli import main
 from .data_row import DataRow
-from .diagram import build_line_figure, build_sankey_figure
+from .diagram import build_sankey_figure, build_trend_figure
 from .io import fetch_data, read_csv_as_df, read_gsheet_as_df
 from .labels import RowLabels
 from .settings import AppSettings
@@ -29,6 +29,7 @@ from .utils import (
     is_empty,
     is_null,
     normalize_amounts,
+    normalize_chart_resolution,
     save_report,
     validate_date_string,
 )
@@ -42,7 +43,7 @@ __all__ = [
     "read_csv_as_df",
     "read_gsheet_as_df",
     "build_sankey_figure",
-    "build_line_figure",
+    "build_trend_figure",
     "main",
     "is_null",
     "is_empty",
@@ -50,4 +51,5 @@ __all__ = [
     "save_report",
     "validate_date_string",
     "normalize_amounts",
+    "normalize_chart_resolution",
 ]

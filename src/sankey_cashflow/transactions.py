@@ -47,7 +47,7 @@ class Transactions:
     def grouped_data(self) -> Union[pd.DataFrame, None]:
         """
           The collapsed (Source, Target, Amount) edge list produced by collapse(). None until
-          process()/process_line() -> collapse() has run.
+          process() -> collapse() has run.
         """
         return self._grouped_df
 
@@ -188,9 +188,9 @@ class Transactions:
         self.collapse()
         # -- END Transactions.process() --
 
-    def process_line(self, date_range=None):
+    def process_trend(self, date_range=None):
         """
-          Process dataframe for line chart diagram
+          Process dataframe for trend diagram
           Step 1: Drop rows based on tag exclusions
           Step 2: Split out any entries containing distributions (if feature flag is turned on)
           Step 3: Apply date filtering (if applicable)
@@ -234,7 +234,7 @@ class Transactions:
 
         # Step 4:
         self.apply_labels()
-        # -- END Transactions.process_line() --
+        # -- END Transactions.process_trend() --
 
     def filter_tags(self, tags_to_exclude):
         # tags_to_exclude: ['tag1','tag2', ...]

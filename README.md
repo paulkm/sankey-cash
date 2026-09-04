@@ -2,7 +2,7 @@
 
 ## Information
 Turns columnar transaction data (a CSV or Google Sheet) into a configurable Sankey diagram or
-line chart of cashflow, via the `sankeyd` command line tool. The underlying classes are also
+trend chart of cashflow, via the `sankeyd` command line tool. The underlying classes are also
 importable directly if you want to build your own pipeline or diagram.
 [![Test coverage](https://paulkm.github.io/sankey-cash/coverage-badge.svg?raw=true)](https://paulkm.github.io/sankey-cash/)
 
@@ -23,7 +23,7 @@ importable directly if you want to build your own pipeline or diagram.
 - `sankeyd -s <name of a Google Sheets document> -t <worksheet name for transactions> --srcmap <worksheet name for sources-targets> --creds <location of service account credentials file>`
     - `-t`, `--srcmap`, and `--creds` are all optional and if omitted will default to `'current_exp'`, `'Sources-Targets'`, and `'./google_service_account_key.json'` respectively.
 - `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' -r` (date range arg is necessary since sample data is older - use 1/1/2021 as start date and 12/31/2021 as end date, or pass `--all_time` to skip the prompt)
-- `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype=line`
+- `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype=trend`
 
 ### Library usage
 If you want to build your own pipeline instead of using `sankeyd` directly:
@@ -56,7 +56,7 @@ The following columns, in this order, are required:
 - Target
     - Optional. Source node for any transaction matching this category. If not specified, label will only be used for color lookups.
 - Classification
-    - Optional. Free text grouping used by the line-chart diagram type (`--dtype line`) to group flows - eg several categories might share a "Housing Exp" classification. Prefix a classification with `x` (eg `xEntertainment`) to hide it from line charts by default. Not used by the Sankey diagram type.
+    - Optional. Free text grouping used by the trend diagram type (`--dtype trend`) to group flows - eg several categories might share a "Housing Exp" classification. Prefix a classification with `x` (eg `xEntertainment`) to hide it from trend charts by default. Not used by the Sankey diagram type.
 - Link color
     - Optional. RGB+Alpha value as string, eg: 'rgba(179, 204, 230, 0.8)'
 - Node color
@@ -141,7 +141,15 @@ A time range can be specified for filtering with `-r`/`--range`, which will prom
 		| 1/1/21 | Income Tax | Joe Job | .. | $700.00 |
 		| 1/1/21 | Health Insurance | Joe Job | .. | $100.00 |
 	  The first line will map to "Joe Job" -> "Income" as expected, but the next two lines have a source of "DEDUCTIONS" in the sources-targets sheet, and will therefore be updated to "Joe Job" -> "Income Tax" and "Joe Job" -> "Health Insurance", bypassing the Income node entirely.
-- Line charts (`--dtype line`)
-	- An alternative to the Sankey diagram: a line chart of spend over time, grouped by each label's Classification column. You'll be prompted for a chart resolution (day, week, or month). Less mature than the Sankey diagram - can get noisy for large datasets, and 'Income', 'Uncategorized', and any Classification prefixed with 'x' are hidden by default.
+- Trend charts (`--dtype trend`)
+	- An alternative to the Sankey diagram: a line chart of spend over time, grouped by each label's Classification column. 'Income', 'Uncategorized', and any Classification prefixed with 'x' are hidden by default, unless explicitly requested with `--trend-category`.
+	- `--resolution` sets the chart resolution: `day`, `week`, `month`, `quarter`, `year`, or an explicit multiple like `'3 months'` or `'6 weeks'` (defaults to `week`). Coarser resolutions aggregate more transactions per datapoint, which generally produces a smoother/more readable line - a category with lumpy or infrequent activity (eg a bill that only lands once or twice a month) can look extremely spiky at `week` resolution and pin to -100%/+300%+ in `percent` mode, since most weeks have $0 activity; `month` or `quarter` usually reads much better for that kind of category. `year` needs more than one year of source data to render an actual line (see the multi-year note below) - with a single year of data it collapses to one point per classification and no line is drawn.
+	- `--trend-mode` controls the Y-axis: `percent` (default) plots each classification as a % deviation from its own baseline, so classifications with very different $ amounts stay comparable on one chart; `dollars` plots raw $ totals and is best for a single classification (or a few with similar baselines - see `--trend-category`), since one big-spend classification will otherwise flatten the smaller ones.
+	- `--trend-baseline` sets the baseline used by `--trend-mode=percent`: `trimmed-mean` (default, trims the top/bottom `--trend-trim` percent - 5% by default - of datapoints before averaging, to reduce the effect of one-off outliers), `mean`, or `median`. Points trimmed out of the baseline calculation are still plotted, just marked as excluded rather than silently dropped.
+	- `--trend-category` restricts the chart to a comma delimited list of classifications, eg `--trend-category 'Housing Exp, Auto'`.
+	- `--trend-outlier-tag` (default `Outlier`) is a Tags value that manually excludes a transaction from trend analysis entirely (both the plotted series and the baseline calculation) - the explicit, user-controlled complement to `--trend-baseline=trimmed-mean`'s automatic statistical trimming.
+	- A classification whose baseline is too close to $0 for a percent comparison to be meaningful automatically falls back to a plain $ delta from baseline for that trace instead.
+	- Example usage (using sample datasets): `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype trend`
+	- Multi-year analysis: since `--source`/`--sheet` both support a wildcard prefix (eg `Transactions_*` matching `Transactions_2023.csv` and `Transactions_2024.csv`, or same-named Google Sheets), a trend chart spanning multiple yearly source sheets works without any extra configuration.
 - Audit mode (`--audit`)
 	- Compares your transaction data against a bank export CSV (Date, Amount, Description columns) to flag transactions that may be missing from your data, rather than generating a diagram.
