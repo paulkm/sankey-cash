@@ -3,7 +3,7 @@ import datetime
 
 import pandas as pd
 
-from .diagram import build_sankey_figure, build_trend_figure
+from .diagram import build_sankey_figure, build_scatter_figure, build_trend_figure
 from .io import fetch_data, read_csv_as_df
 from .labels import RowLabels
 from .settings import AppSettings
@@ -35,7 +35,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audit", help="Audit source data transactions for missing items", action="store_true")
     parser.add_argument("--recurring", help="Split recurring expenses out", action="store_true")
     parser.add_argument("--hover", help="Grouping field for hover text. Defaults to 'Category'")
-    parser.add_argument("--dtype", help="Diagram type to generate (sankey, trend). Defaults to 'sankey'")
+    parser.add_argument("--dtype", help="Diagram type to generate (sankey, trend, scatter). Defaults to 'sankey'")
     parser.add_argument("--resolution", help="Chart resolution for the trend diagram type: day, week, month, "
                         "quarter, year, or an explicit multiple like '3 months'. Defaults to 'week'")
     parser.add_argument("--trend-mode", dest="trend_mode",
@@ -54,6 +54,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trend-outlier-tag", dest="trend_outlier_tag",
                         help="Tag used to manually exclude a transaction from trend analysis entirely (baseline "
                         "and plotted values). Defaults to 'Outlier'.")
+    parser.add_argument("--scatter-smoothing", dest="scatter_smoothing",
+                        help="Smoothing method for the scatter diagram type: 'lowess' or 'moving-average'. "
+                        "Defaults to 'lowess'.")
+    parser.add_argument("--scatter-lowess-frac", dest="scatter_lowess_frac",
+                        help="LOWESS smoothing fraction in (0, 1], used when --scatter-smoothing=lowess. "
+                        "Defaults to 0.3.")
+    parser.add_argument("--scatter-ma-window", dest="scatter_ma_window",
+                        help="Moving-average window, used when --scatter-smoothing=moving-average. Same syntax "
+                        "as --resolution (day, week, month, quarter, year, or an explicit multiple like "
+                        "'3 months'). Defaults to 'month'.")
     return parser
 
 
@@ -110,7 +120,7 @@ def main(argv=None):
 
     if app_settings.diagram_type == 'sankey':
         transactions_data.process(date_range)
-    elif app_settings.diagram_type == 'trend':
+    elif app_settings.diagram_type in ('trend', 'scatter'):
         transactions_data.process_trend(date_range)
     else:
         print(f"Invalid diagram type: {app_settings.diagram_type}")
@@ -123,8 +133,10 @@ def main(argv=None):
 
     if app_settings.diagram_type == 'sankey':
         fig = build_sankey_figure(transactions_data, sources_targets, app_settings)
-    else:
+    elif app_settings.diagram_type == 'trend':
         fig = build_trend_figure(transactions_data, app_settings)
+    else:
+        fig = build_scatter_figure(transactions_data, app_settings)
     fig.show()
 
 

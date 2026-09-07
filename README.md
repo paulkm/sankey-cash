@@ -151,5 +151,14 @@ A time range can be specified for filtering with `-r`/`--range`, which will prom
 	- A classification whose baseline is too close to $0 for a percent comparison to be meaningful automatically falls back to a plain $ delta from baseline for that trace instead.
 	- Example usage (using sample datasets): `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype trend`
 	- Multi-year analysis: since `--source`/`--sheet` both support a wildcard prefix (eg `Transactions_*` matching `Transactions_2023.csv` and `Transactions_2024.csv`, or same-named Google Sheets), a trend chart spanning multiple yearly source sheets works without any extra configuration.
+- Scatter charts (`--dtype scatter`)
+	- Another alternative to the Sankey diagram: a scatter plot of individual transactions (date vs. $ amount) for a single Classification, with a smoothing line overlay - useful for eyeballing the trend within one category without the resampling/bucketing the trend diagram type does.
+	- Requires exactly one value in `--trend-category` (eg `--trend-category 'Auto'`) - unlike the trend diagram type, there's no default set of classifications to chart, since a scatter of everything at once isn't readable.
+	- Always plots raw $ amounts (`--trend-mode`/`--trend-baseline` are ignored - a single transaction has no baseline to compare against).
+	- `--scatter-smoothing` selects the overlay line: `lowess` (default - a locally-weighted regression curve fit via the `statsmodels` package) or `moving-average` (a rolling mean).
+	- `--scatter-lowess-frac` sets the LOWESS smoothing fraction (0, 1] - defaults to 0.3; larger values produce a smoother, less locally-responsive curve.
+	- `--scatter-ma-window` sets the moving-average window when `--scatter-smoothing=moving-average`, using the same syntax as `--resolution` (`day`, `week`, `month`, `quarter`, `year`, or an explicit multiple like `'3 months'`) - defaults to `month`.
+	- `--trend-outlier-tag` (default `Outlier`) still applies - a tagged transaction is dropped from both the scatter and the smoothing line.
+	- Example usage (using sample datasets): `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype scatter --trend-category 'Auto'`
 - Audit mode (`--audit`)
 	- Compares your transaction data against a bank export CSV (Date, Amount, Description columns) to flag transactions that may be missing from your data, rather than generating a diagram.

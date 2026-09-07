@@ -37,6 +37,9 @@ class TestDefaultInitialization:
         assert settings.trend_trim == 5.0
         assert settings.trend_category is None
         assert settings.trend_outlier_tag == 'Outlier'
+        assert settings.scatter_smoothing == 'lowess'
+        assert settings.scatter_lowess_frac == 0.3
+        assert settings.scatter_ma_window == 'month'
         assert settings.colors == {}
 
     def test_verbose_logging(self, make_args):
@@ -71,6 +74,10 @@ class TestDiagramType:
     def test_unrecognized_dtype_keeps_default(self, make_args):
         settings = AppSettings(make_args(dtype='pie'))
         assert settings.diagram_type == 'sankey'
+
+    def test_scatter_dtype_with_single_category(self, make_args):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto'))
+        assert settings.diagram_type == 'scatter'
 
 
 class TestChartResolution:
@@ -129,6 +136,45 @@ class TestTrendOptions:
     def test_trend_outlier_tag_override(self, make_args):
         settings = AppSettings(make_args(trend_outlier_tag='Skip'))
         assert settings.trend_outlier_tag == 'Skip'
+
+
+class TestScatterOptions:
+
+    @pytest.mark.parametrize('smoothing_arg,expected', [
+        ('lowess', 'lowess'), ('moving-average', 'moving-average'), ('LOWESS', 'lowess')
+    ])
+    def test_recognized_scatter_smoothing(self, make_args, smoothing_arg, expected):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_smoothing=smoothing_arg))
+        assert settings.scatter_smoothing == expected
+
+    def test_unrecognized_scatter_smoothing_keeps_default(self, make_args):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_smoothing='spline'))
+        assert settings.scatter_smoothing == 'lowess'
+
+    def test_scatter_lowess_frac_parses_float(self, make_args):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_lowess_frac='0.5'))
+        assert settings.scatter_lowess_frac == 0.5
+
+    @pytest.mark.parametrize('bad_frac', ['not-a-number', '0', '-0.1', '1.5'])
+    def test_scatter_lowess_frac_out_of_range_keeps_default(self, make_args, bad_frac):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_lowess_frac=bad_frac))
+        assert settings.scatter_lowess_frac == 0.3
+
+    def test_scatter_ma_window_normalized(self, make_args):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_ma_window='3 weeks'))
+        assert settings.scatter_ma_window == '3week'
+
+    def test_scatter_ma_window_unrecognized_keeps_default(self, make_args):
+        settings = AppSettings(make_args(dtype='scatter', trend_category='Auto', scatter_ma_window='fortnight'))
+        assert settings.scatter_ma_window == 'month'
+
+    def test_scatter_requires_trend_category(self, make_args):
+        with pytest.raises(Exception):
+            AppSettings(make_args(dtype='scatter'))
+
+    def test_scatter_rejects_multiple_trend_categories(self, make_args):
+        with pytest.raises(Exception):
+            AppSettings(make_args(dtype='scatter', trend_category='Auto, Housing Exp'))
 
 
 class TestTagsStoresExclude:

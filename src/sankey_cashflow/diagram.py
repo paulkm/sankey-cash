@@ -3,9 +3,15 @@ import statistics
 
 import pandas as pd
 import plotly.graph_objects as go
+from statsmodels.nonparametric.smoothers_lowess import lowess
 
 from .data_row import DataRow
 from .utils import is_empty, logger
+
+# Approximate day-count for each named --scatter-ma-window preset, used to turn a
+# normalize_chart_resolution() string into a pandas offset-rolling window (eg "30D") - calendar
+# month/quarter/year lengths aren't fixed, so rolling() can't use them directly as offset aliases.
+_RESOLUTION_APPROX_DAYS = {"day": 1, "week": 7, "month": 30, "quarter": 91, "year": 365}
 
 # pandas resample frequency alias for each single-unit --resolution preset.
 _RESOLUTION_UNIT_FREQ = {"day": "D", "week": "W", "month": "ME"}
@@ -294,4 +300,100 @@ def build_trend_figure(transactions, app_settings) -> go.Figure:
                 hovertemplate="Excluded from baseline calc<br>%{y:+.1f}%<extra></extra>",
             ))
     fig.update_layout(yaxis_title="% deviation from baseline")
+    return fig
+
+
+def _days_for_window(window):
+    """
+      Convert a normalize_chart_resolution() string (a named preset - "day", "week", "month",
+      "quarter", "year" - or an explicit multiple like "3month") to an approximate day-count,
+      for use as a pandas offset-rolling window (eg "30D"). Calendar month/quarter/year lengths
+      vary, so they can't be used directly as rolling() offset aliases the way "D"/"W" can.
+    """
+    if window in _RESOLUTION_APPROX_DAYS:
+        return _RESOLUTION_APPROX_DAYS[window]
+    match = _RESOLUTION_MULTIPLIER_RE.match(window or "")
+    if match:
+        n, unit = match.groups()
+        return int(n) * _RESOLUTION_APPROX_DAYS[unit]
+    logger.warning(f"Unrecognized scatter moving-average window '{window}', defaulting to 'month'")
+    return _RESOLUTION_APPROX_DAYS["month"]
+
+
+def _scatter_dataframe(transactions, app_settings):
+    """
+      Build the filtered, sorted per-transaction dataframe a scatter chart plots: Total Amount
+      (Amount + Sales Tax + Tips, via _sum_row_amount) for every transaction in the single
+      Classification named by app_settings.trend_category[0] (AppSettings guarantees exactly one
+      value for --dtype scatter), with Outlier-tagged rows dropped (same semantics as the trend
+      chart's _exclude_outlier_tagged_rows). Returns (dataframe, classification_name).
+    """
+    df = transactions.processed_data.assign(**{"Total Amount": None})
+    df["Total Amount"] = df.apply(_sum_row_amount, axis=1)
+    df = _exclude_outlier_tagged_rows(df, app_settings.trend_outlier_tag)
+
+    classification = app_settings.trend_category[0]
+    filtered = df[df["Classification"] == classification].sort_values("Date")
+    if len(filtered) == 0:
+        logger.warning(f"No transactions found for classification '{classification}'.")
+    return filtered, classification
+
+
+def _lowess_smoothing(filtered, frac):
+    """
+      Fit a LOWESS curve (statsmodels) to a classification's individual transaction points -
+      x is days since the earliest plotted transaction (LOWESS needs a numeric x), y is Total
+      Amount. Returns (x_dates, y_values) for the fitted curve, re-expressed back in real dates.
+    """
+    min_date = filtered["Date"].min()
+    x_days = (filtered["Date"] - min_date).dt.days.to_numpy(dtype=float)
+    y_values = filtered["Total Amount"].to_numpy(dtype=float)
+    smoothed = lowess(endog=y_values, exog=x_days, frac=frac, return_sorted=True)
+    x_dates = min_date + pd.to_timedelta(smoothed[:, 0], unit="D")
+    return x_dates, smoothed[:, 1]
+
+
+def _moving_average_smoothing(filtered, window):
+    """
+      Rolling-mean overlay: sum same-day transactions, reindex over every calendar day in the
+      plotted range (filling gap days with $0 - unlike the trend chart's NaN-gap convention, a
+      no-spend day is a real $0 for a moving average, not a period to skip), then take a rolling
+      mean over a window sized by _days_for_window(window). Returns (x_dates, y_values).
+    """
+    daily = filtered.groupby("Date")["Total Amount"].sum()
+    date_idx = pd.date_range(start=filtered["Date"].min(), end=filtered["Date"].max())
+    daily = daily.reindex(date_idx, fill_value=0.0)
+    days = _days_for_window(window)
+    smoothed = daily.rolling(window=f"{days}D", min_periods=1).mean()
+    return smoothed.index, smoothed.to_numpy()
+
+
+def build_scatter_figure(transactions, app_settings) -> go.Figure:
+    """
+      Build a plotly scatter chart of individual transactions for a single Classification
+      (app_settings.trend_category[0]), plus a smoothing line overlay (app_settings.scatter_smoothing:
+      'lowess', via statsmodels, or 'moving-average'). Dollars only - unlike the trend diagram type,
+      there's no percent/baseline mode here, since a single raw transaction has no natural
+      baseline to compare against.
+    """
+    filtered, classification = _scatter_dataframe(transactions, app_settings)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=filtered["Date"], y=filtered["Total Amount"], mode='markers', name=classification,
+        text=filtered["Description"], hovertemplate="%{text}<br>$%{y:.2f}<extra></extra>",
+    ))
+
+    if len(filtered) >= 2:
+        if app_settings.scatter_smoothing == "moving-average":
+            x_smooth, y_smooth = _moving_average_smoothing(filtered, app_settings.scatter_ma_window)
+            line_name = f"{classification} ({app_settings.scatter_ma_window} moving avg)"
+        else:
+            x_smooth, y_smooth = _lowess_smoothing(filtered, app_settings.scatter_lowess_frac)
+            line_name = f"{classification} (LOWESS)"
+        fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode='lines', name=line_name))
+    else:
+        logger.warning(f"Not enough datapoints for '{classification}' to compute a smoothing line.")
+
+    fig.update_layout(yaxis_title="Amount ($)", xaxis_title="Date", title=f"{classification} transactions")
     return fig

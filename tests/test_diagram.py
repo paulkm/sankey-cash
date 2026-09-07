@@ -3,7 +3,15 @@ import plotly.graph_objects as go
 import pytest
 
 import sankey_cashflow.diagram as diagram_module
-from sankey_cashflow import AppSettings, RowLabels, Transactions, build_sankey_figure, build_trend_figure, fetch_data
+from sankey_cashflow import (
+    AppSettings,
+    RowLabels,
+    Transactions,
+    build_sankey_figure,
+    build_scatter_figure,
+    build_trend_figure,
+    fetch_data,
+)
 
 
 def _process(make_args, **overrides):
@@ -221,6 +229,84 @@ class TestBuildTrendFigure:
         assert not (tagged_rows['Tags'] == 'Outlier').all()
         filtered = diagram_module._exclude_outlier_tagged_rows(txn.processed_data, 'Outlier')
         assert len(filtered) == len(txn.processed_data)
+
+
+class TestBuildScatterFigure:
+
+    def _single_category_settings(self, txn, settings):
+        classification = next(c for c in txn.processed_data['Classification'].unique()
+                              if c not in ('Income', 'Uncategorized') and not c.startswith('x'))
+        settings.trend_category = [classification]
+        return classification
+
+    def test_returns_figure_with_markers_and_line(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        classification = self._single_category_settings(txn, settings)
+        fig = build_scatter_figure(txn, settings)
+        assert isinstance(fig, go.Figure)
+        assert fig.data[0].mode == 'markers'
+        assert len(fig.data) == 2
+        assert fig.data[1].mode == 'lines'
+        expected_points = len(txn.processed_data[txn.processed_data['Classification'] == classification])
+        assert len(fig.data[0].x) == expected_points
+
+    def test_yaxis_is_always_dollars(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        self._single_category_settings(txn, settings)
+        fig = build_scatter_figure(txn, settings)
+        assert fig.layout.yaxis.title.text == "Amount ($)"
+
+    def test_moving_average_smoothing_produces_line(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        classification = self._single_category_settings(txn, settings)
+        settings.scatter_smoothing = 'moving-average'
+        fig = build_scatter_figure(txn, settings)
+        assert len(fig.data) == 2
+        assert 'moving avg' in fig.data[1].name
+        assert classification in fig.data[1].name
+
+    def test_lowess_smoothing_is_default(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        self._single_category_settings(txn, settings)
+        fig = build_scatter_figure(txn, settings)
+        assert 'LOWESS' in fig.data[1].name
+
+    def test_outlier_tag_excludes_row(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        classification = self._single_category_settings(txn, settings)
+        row_idx = txn.processed_data[txn.processed_data['Classification'] == classification].index[0]
+        txn.processed_data.at[row_idx, 'Tags'] = 'Outlier'
+        fig_with_tag = build_scatter_figure(txn, settings)
+        txn.processed_data.at[row_idx, 'Tags'] = None
+        fig_without_tag = build_scatter_figure(txn, settings)
+        assert len(fig_with_tag.data[0].x) == len(fig_without_tag.data[0].x) - 1
+
+    def test_too_few_points_skips_smoothing_line(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        classification = self._single_category_settings(txn, settings)
+        keep_idx = txn.processed_data[txn.processed_data['Classification'] == classification].index[0]
+        drop_idx = [i for i in txn.processed_data[txn.processed_data['Classification'] == classification].index
+                    if i != keep_idx]
+        txn.processed_data.drop(drop_idx, inplace=True)
+        fig = build_scatter_figure(txn, settings)
+        assert len(fig.data) == 1
+
+    def test_requires_exactly_one_trend_category(self, make_args):
+        with pytest.raises(Exception):
+            AppSettings(make_args(dtype='scatter'))
+
+
+class TestDaysForWindow:
+
+    @pytest.mark.parametrize('window,expected', [
+        ('day', 1), ('week', 7), ('month', 30), ('quarter', 91), ('year', 365),
+        ('3month', 90), ('6week', 42), ('10day', 10),
+    ])
+    def test_recognized_windows(self, window, expected):
+        assert diagram_module._days_for_window(window) == expected
+
+    def test_unrecognized_window_falls_back_to_month(self):
+        assert diagram_module._days_for_window('bogus') == 30
 
 
 class TestResampleFreqForResolution:

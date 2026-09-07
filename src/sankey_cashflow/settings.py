@@ -48,6 +48,9 @@ class AppSettings:
         self.trend_trim = 5.0
         self.trend_category = None
         self.trend_outlier_tag = "Outlier"
+        self.scatter_smoothing = "lowess"
+        self.scatter_lowess_frac = 0.3
+        self.scatter_ma_window = "month"
         if args.verbose:
             logger.setLevel(logging.DEBUG)
             logger.handlers[0].setLevel(logging.DEBUG)  # Assumes only one handler
@@ -59,7 +62,7 @@ class AppSettings:
             if args.hover.lower() in ["none", "no", "false"]:
                 self.hover = None
         if args.dtype:
-            if args.dtype.lower() in ["sankey", "trend"]:
+            if args.dtype.lower() in ["sankey", "trend", "scatter"]:
                 self.diagram_type = args.dtype.lower()
             else:
                 logger.warning(f"Unknown diagram type: {args.dtype}")
@@ -93,6 +96,28 @@ class AppSettings:
             self.trend_category = [i.strip() for i in args.trend_category.split(',')]
         if args.trend_outlier_tag:
             self.trend_outlier_tag = args.trend_outlier_tag
+        if args.scatter_smoothing:
+            if args.scatter_smoothing.lower() in ["lowess", "moving-average"]:
+                self.scatter_smoothing = args.scatter_smoothing.lower()
+            else:
+                logger.warning(f"Unknown scatter smoothing method: {args.scatter_smoothing}, \
+                    defaulting to '{self.scatter_smoothing}'")
+        if args.scatter_lowess_frac is not None:
+            try:
+                frac_val = float(args.scatter_lowess_frac)
+                if not (0 < frac_val <= 1):
+                    raise ValueError
+                self.scatter_lowess_frac = frac_val
+            except ValueError:
+                logger.warning(f"Invalid scatter LOWESS fraction: {args.scatter_lowess_frac}, defaulting to \
+                    {self.scatter_lowess_frac} (must be a number in (0, 1])")
+        if args.scatter_ma_window:
+            normalized_ma_window = normalize_chart_resolution(args.scatter_ma_window)
+            if normalized_ma_window:
+                self.scatter_ma_window = normalized_ma_window
+            else:
+                logger.warning(f"Unknown scatter moving-average window: {args.scatter_ma_window}, \
+                    defaulting to '{self.scatter_ma_window}'")
         if args.tags:
             self.tags = [i.strip() for i in args.tags.split(',')]
             if args.tag_override:
@@ -106,6 +131,11 @@ class AppSettings:
         self.colors = {}  # label: [link, node]
         if self.tags and self.stores:
             raise Exception("Stores and tags visualizations should not be combined!")
+        if self.diagram_type == "scatter":
+            if not self.trend_category or len(self.trend_category) != 1:
+                raise Exception("--dtype scatter requires exactly one --trend-category value.")
+            if args.trend_mode:
+                logger.warning("--trend-mode is ignored by --dtype scatter (always plots dollar amounts).")
         self.validate_sources()
 
     @property

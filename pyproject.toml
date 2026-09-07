@@ -21,7 +21,8 @@ dependencies = [
     "plotly ~= 5.24.1",
     "numpy ~= 1.26.4",
     "networkx ~= 2.8.8",
-    "matplotlib"
+    "matplotlib",
+    "statsmodels ~= 0.14"
   ]
 classifiers = [
     "Programming Language :: Python :: 3",
