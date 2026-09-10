@@ -1,3 +1,4 @@
+import math
 import re
 import statistics
 
@@ -284,11 +285,14 @@ def build_trend_figure(transactions, app_settings) -> go.Figure:
             continue
 
         pct_values = [(v - baseline) / baseline * 100 if v == v else float("nan") for v in values]
-        dollar_deltas = [v - baseline if v == v else float("nan") for v in values]
+        dollar_deltas = [
+            math.trunc((v - baseline) * 100) / 100 if v == v else float("nan")
+            for v in values
+        ]
         fig.add_trace(go.Scatter(
             x=series.index.to_list(), y=pct_values, mode='lines', connectgaps=True,
             name=classification, customdata=dollar_deltas,
-            hovertemplate="%{y:+.1f}%<br>≈ $%{customdata:+.2f} vs baseline<extra></extra>",
+            hovertemplate="%{y:+.1f}%<br>≈ $%{customdata:+.2f} vs baseline($" + str(baseline) + ")<extra></extra>",
         ))
 
         if outlier_positions:
@@ -300,6 +304,42 @@ def build_trend_figure(transactions, app_settings) -> go.Figure:
                 hovertemplate="Excluded from baseline calc<br>%{y:+.1f}%<extra></extra>",
             ))
     fig.update_layout(yaxis_title="% deviation from baseline")
+    return fig
+
+
+def build_bar_figure(transactions, app_settings) -> go.Figure:
+    """
+      Build a plotly stacked bar chart of spend over time: one bar per app_settings.chart_resolution
+      period, segmented by Classification and proportioned by that classification's $ total for the
+      period. Dollars only - unlike the trend diagram type, there's no percent/baseline mode here
+      (see app_settings.trend_mode, which this ignores entirely).
+
+      Unlike the trend chart's line (where a $0 period is drawn as a gap, not a dip to zero/-100%),
+      a stacked bar has no "gap" concept - a period with no activity for a classification is
+      legitimately a zero-height segment, so periods are filled with $0 rather than NaN.
+
+      Rows tagged with app_settings.trend_outlier_tag are dropped entirely before charting (see
+      _exclude_outlier_tagged_rows). 'Income', 'Uncategorized', and any classification prefixed
+      with 'x' are hidden by default unless app_settings.trend_category explicitly requests them
+      (see _resolve_classifications).
+    """
+    df = transactions.processed_data.assign(**{"Total Amount": None})
+    df["Total Amount"] = df.apply(_sum_row_amount, axis=1)
+    df = _exclude_outlier_tagged_rows(df, app_settings.trend_outlier_tag)
+
+    classifications = _resolve_classifications(df, app_settings)
+    if not classifications:
+        logger.warning("No classifications available to chart for the bar diagram.")
+
+    date_idx = pd.date_range(start=df["Date"].min(), end=df["Date"].max())
+    freq = _resample_freq_for_resolution(app_settings.chart_resolution)
+
+    fig = go.Figure()
+    for classification in classifications:
+        series = _resample_series(df, classification, date_idx, freq, fill_value=0.0)
+        fig.add_trace(go.Bar(x=series.index.to_list(), y=series.to_list(), name=classification))
+
+    fig.update_layout(barmode='stack', yaxis_title="Amount ($)", xaxis_title="Date")
     return fig
 
 

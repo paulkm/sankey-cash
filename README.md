@@ -160,5 +160,12 @@ A time range can be specified for filtering with `-r`/`--range`, which will prom
 	- `--scatter-ma-window` sets the moving-average window when `--scatter-smoothing=moving-average`, using the same syntax as `--resolution` (`day`, `week`, `month`, `quarter`, `year`, or an explicit multiple like `'3 months'`) - defaults to `month`.
 	- `--trend-outlier-tag` (default `Outlier`) still applies - a tagged transaction is dropped from both the scatter and the smoothing line.
 	- Example usage (using sample datasets): `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype scatter --trend-category 'Auto'`
+- Stacked bar charts (`--dtype bar`)
+	- Another alternative to the Sankey diagram: a stacked bar chart with one bar per `--resolution` period, segmented by Classification and proportioned by that classification's $ total for the period.
+	- `--resolution` and `--trend-category` apply exactly as they do for the trend diagram type (see above): resolution sets the bucket size, and trend-category restricts/orders the classifications charted (default: all classifications except `Income`, `Uncategorized`, and any `x`-prefixed classification).
+	- Always plots raw $ amounts (`--trend-mode` is ignored, with a warning if passed) - there's no baseline to compute, so there's no percent-of-baseline equivalent for a stacked bar.
+	- Unlike the trend diagram type's line (where a $0 period is drawn as a gap), a period with no activity for a classification renders as a zero-height segment, not a gap.
+	- `--trend-outlier-tag` (default `Outlier`) still applies - a tagged transaction is dropped before charting.
+	- Example usage (using sample datasets): `sankeyd -s 'sample_data/expenses.csv' --srcmap 'sample_data/labels.csv' --all_time --dtype bar`
 - Audit mode (`--audit`)
 	- Compares your transaction data against a bank export CSV (Date, Amount, Description columns) to flag transactions that may be missing from your data, rather than generating a diagram.

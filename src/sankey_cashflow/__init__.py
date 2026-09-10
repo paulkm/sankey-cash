@@ -19,7 +19,7 @@ Notes:
 
 from .cli import main
 from .data_row import DataRow
-from .diagram import build_sankey_figure, build_scatter_figure, build_trend_figure
+from .diagram import build_bar_figure, build_sankey_figure, build_scatter_figure, build_trend_figure
 from .io import fetch_data, read_csv_as_df, read_gsheet_as_df
 from .labels import RowLabels
 from .settings import AppSettings
@@ -45,6 +45,7 @@ __all__ = [
     "build_sankey_figure",
     "build_trend_figure",
     "build_scatter_figure",
+    "build_bar_figure",
     "main",
     "is_null",
     "is_empty",

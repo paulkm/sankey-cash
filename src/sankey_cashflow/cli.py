@@ -3,7 +3,7 @@ import datetime
 
 import pandas as pd
 
-from .diagram import build_sankey_figure, build_scatter_figure, build_trend_figure
+from .diagram import build_bar_figure, build_sankey_figure, build_scatter_figure, build_trend_figure
 from .io import fetch_data, read_csv_as_df
 from .labels import RowLabels
 from .settings import AppSettings
@@ -35,7 +35,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audit", help="Audit source data transactions for missing items", action="store_true")
     parser.add_argument("--recurring", help="Split recurring expenses out", action="store_true")
     parser.add_argument("--hover", help="Grouping field for hover text. Defaults to 'Category'")
-    parser.add_argument("--dtype", help="Diagram type to generate (sankey, trend, scatter). Defaults to 'sankey'")
+    parser.add_argument("--dtype", help="Diagram type to generate (sankey, trend, scatter, bar). Defaults to 'sankey'")
     parser.add_argument("--resolution", help="Chart resolution for the trend diagram type: day, week, month, "
                         "quarter, year, or an explicit multiple like '3 months'. Defaults to 'week'")
     parser.add_argument("--trend-mode", dest="trend_mode",
@@ -120,7 +120,7 @@ def main(argv=None):
 
     if app_settings.diagram_type == 'sankey':
         transactions_data.process(date_range)
-    elif app_settings.diagram_type in ('trend', 'scatter'):
+    elif app_settings.diagram_type in ('trend', 'scatter', 'bar'):
         transactions_data.process_trend(date_range)
     else:
         print(f"Invalid diagram type: {app_settings.diagram_type}")
@@ -135,8 +135,10 @@ def main(argv=None):
         fig = build_sankey_figure(transactions_data, sources_targets, app_settings)
     elif app_settings.diagram_type == 'trend':
         fig = build_trend_figure(transactions_data, app_settings)
-    else:
+    elif app_settings.diagram_type == 'scatter':
         fig = build_scatter_figure(transactions_data, app_settings)
+    else:
+        fig = build_bar_figure(transactions_data, app_settings)
     fig.show()
 
 

@@ -62,7 +62,7 @@ class AppSettings:
             if args.hover.lower() in ["none", "no", "false"]:
                 self.hover = None
         if args.dtype:
-            if args.dtype.lower() in ["sankey", "trend", "scatter"]:
+            if args.dtype.lower() in ["sankey", "trend", "scatter", "bar"]:
                 self.diagram_type = args.dtype.lower()
             else:
                 logger.warning(f"Unknown diagram type: {args.dtype}")
@@ -136,6 +136,8 @@ class AppSettings:
                 raise Exception("--dtype scatter requires exactly one --trend-category value.")
             if args.trend_mode:
                 logger.warning("--trend-mode is ignored by --dtype scatter (always plots dollar amounts).")
+        if self.diagram_type == "bar" and args.trend_mode:
+            logger.warning("--trend-mode is ignored by --dtype bar (always plots dollar amounts).")
         self.validate_sources()
 
     @property

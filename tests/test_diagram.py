@@ -7,6 +7,7 @@ from sankey_cashflow import (
     AppSettings,
     RowLabels,
     Transactions,
+    build_bar_figure,
     build_sankey_figure,
     build_scatter_figure,
     build_trend_figure,
@@ -294,6 +295,84 @@ class TestBuildScatterFigure:
     def test_requires_exactly_one_trend_category(self, make_args):
         with pytest.raises(Exception):
             AppSettings(make_args(dtype='scatter'))
+
+
+class TestBuildBarFigure:
+
+    def test_returns_stacked_bar_figure(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        settings.chart_resolution = 'week'
+        fig = build_bar_figure(txn, settings)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) > 0
+        assert all(isinstance(trace, go.Bar) for trace in fig.data)
+        assert fig.layout.barmode == 'stack'
+
+    def test_yaxis_is_always_dollars(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        fig = build_bar_figure(txn, settings)
+        assert fig.layout.yaxis.title.text == "Amount ($)"
+
+    def test_excludes_income_and_uncategorized(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        settings.chart_resolution = 'month'
+        fig = build_bar_figure(txn, settings)
+        trace_names = [t.name for t in fig.data]
+        assert not any(name.startswith('Income') for name in trace_names)
+        assert not any(name.startswith('Uncategorized') for name in trace_names)
+
+    def test_excludes_x_prefixed_classifications(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        settings.chart_resolution = 'month'
+        fig = build_bar_figure(txn, settings)
+        trace_names = [t.name for t in fig.data]
+        assert any(name.startswith('x') for name in txn.processed_data['Classification'].unique())
+        assert not any(name.startswith('x') for name in trace_names)
+
+    def test_all_traces_share_the_same_x_categories(self, trend_transactions):
+        # Stacking only lines up if every classification's trace was resampled over the same
+        # date range/frequency - true here since they all reindex against the same date_idx.
+        txn, _, settings = trend_transactions
+        settings.chart_resolution = 'month'
+        fig = build_bar_figure(txn, settings)
+        assert len(fig.data) > 1
+        first_x = list(fig.data[0].x)
+        assert all(list(trace.x) == first_x for trace in fig.data)
+
+    def test_gap_period_is_zero_not_nan(self, trend_transactions):
+        # Unlike the trend line chart, a period with no activity for a classification must render
+        # as a literal 0 (a real stacked-bar segment height), not a NaN gap.
+        txn, _, settings = trend_transactions
+        settings.chart_resolution = 'month'
+        fig = build_bar_figure(txn, settings)
+        assert all(all(y == y for y in trace.y) for trace in fig.data)  # y == y is False for NaN
+
+    def test_trend_category_restricts_and_orders_classifications(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        available = sorted(c for c in txn.processed_data['Classification'].unique()
+                           if c not in ('Income', 'Uncategorized') and not c.startswith('x'))
+        settings.trend_category = [available[1], available[0]]
+        fig = build_bar_figure(txn, settings)
+        trace_names = [t.name for t in fig.data]
+        assert trace_names == [available[1], available[0]]
+
+    def test_outlier_tag_excludes_row(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        classification = next(c for c in txn.processed_data['Classification'].unique()
+                              if c not in ('Income', 'Uncategorized') and not c.startswith('x'))
+        settings.trend_category = [classification]
+        row_idx = txn.processed_data[txn.processed_data['Classification'] == classification].index[0]
+        txn.processed_data.at[row_idx, 'Tags'] = 'Outlier'
+        fig_with_tag = build_bar_figure(txn, settings)
+        txn.processed_data.at[row_idx, 'Tags'] = None
+        fig_without_tag = build_bar_figure(txn, settings)
+        assert fig_with_tag.data[0].y != fig_without_tag.data[0].y
+
+    def test_trend_mode_is_ignored(self, trend_transactions):
+        txn, _, settings = trend_transactions
+        settings.trend_mode = 'percent'
+        fig = build_bar_figure(txn, settings)
+        assert fig.layout.yaxis.title.text == "Amount ($)"
 
 
 class TestDaysForWindow:

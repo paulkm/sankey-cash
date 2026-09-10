@@ -66,7 +66,9 @@ class TestHoverOption:
 
 class TestDiagramType:
 
-    @pytest.mark.parametrize('dtype_arg,expected', [('sankey', 'sankey'), ('trend', 'trend'), ('TREND', 'trend')])
+    @pytest.mark.parametrize('dtype_arg,expected', [
+        ('sankey', 'sankey'), ('trend', 'trend'), ('TREND', 'trend'), ('bar', 'bar'),
+    ])
     def test_recognized_dtype(self, make_args, dtype_arg, expected):
         settings = AppSettings(make_args(dtype=dtype_arg))
         assert settings.diagram_type == expected
@@ -175,6 +177,19 @@ class TestScatterOptions:
     def test_scatter_rejects_multiple_trend_categories(self, make_args):
         with pytest.raises(Exception):
             AppSettings(make_args(dtype='scatter', trend_category='Auto, Housing Exp'))
+
+
+class TestBarOptions:
+
+    def test_bar_dtype_does_not_require_trend_category(self, make_args):
+        # Unlike scatter, bar charts multiple classifications - no single-category requirement.
+        settings = AppSettings(make_args(dtype='bar'))
+        assert settings.diagram_type == 'bar'
+
+    def test_bar_dtype_with_trend_mode_does_not_raise(self, make_args):
+        # --trend-mode is ignored (with a warning) by --dtype bar, rather than erroring.
+        settings = AppSettings(make_args(dtype='bar', trend_mode='percent'))
+        assert settings.diagram_type == 'bar'
 
 
 class TestTagsStoresExclude:
