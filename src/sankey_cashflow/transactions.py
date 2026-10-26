@@ -3,7 +3,9 @@ from typing import Optional, Union
 from uuid import uuid4
 
 import networkx as nx
+import numpy as np
 import pandas as pd
+import re
 from pandas._libs.tslibs import nattype, timestamps
 
 from .data_row import DataRow
@@ -87,7 +89,52 @@ class Transactions:
         dt_today = datetime.datetime.today()
         audit_report = ""
 
+        def safe_sum(pd_series):
+            """
+            Safely sum a transaction frame
+            """
+            def vval(val):
+                if pd.isna(val) or val == "":
+                    return 0
+                return round(float(val), 2)
+            return round(pd_series["Amount"] + vval(pd_series.get("Sales Tax")) + vval(pd_series.get("Tips")), 2)
+
+        def combine_split_rows(self) -> None:
+            df = self._df
+            df["Date"] = pd.to_datetime(df["Date"]).dt.normalize()   # drop time-of-day
+            df["Description"] = df["Description"].str.strip()
+
+            mask = df["Comments"].str.contains("split", case=False, na=False)
+            split_rows = df[mask]
+            other_rows = df[~mask]
+
+            combined = (
+                split_rows.groupby(["Date", "Description"], as_index=False)
+                        .agg(
+                            RowSum=("RowSum", "sum"),
+                            Category=("Category", "first"),
+                            Comments=("Comments", "first"),
+                        )
+            )
+            # Ensure RowSum is rounded to 2 decimal places after combining split rows
+            combined["RowSum"] = combined["RowSum"].round(2)
+
+            self._df = (
+                pd.concat([other_rows, combined], ignore_index=True)
+                .sort_values("Date", kind="stable")
+                .reset_index(drop=True)
+            )
+
+        def truncate_audit_data(audit_data, df):
+            # Find the earliest and latest dates in the main dataframe
+            min_date = df["Date"].min()
+            max_date = df["Date"].max()
+            # Truncate the audit data to the same date range
+            audit_data = df_date_filter(audit_data, min_date, max_date)
+            return audit_data
+
         # Step 1
+        # Note: currently this codepath does not work
         if self._app_settings.filter_dates:
             if not date_range:
                 raise Exception("Filter dates flag was True, but no dates were passed in!")
@@ -101,29 +148,42 @@ class Transactions:
         elif not self._app_settings.all_time:
             audit_data = df_date_filter(audit_data, self._app_settings.DEFAULT_START_DATE, dt_today)
 
-        def safe_sum(pd_series):
-            """
-            Safely sum a transaction frame
-            """
-            def vval(val):
-                if not val:
-                    return 0
-                return round(float(val), 2)
-            return round(pd_series["Amount"] + vval(pd_series.get("Sales Tax")) + vval(pd_series.get("Tips")), 2)
+        # Ensure that the audit data is the same date range as the main dataframe
+        # Note: a known issue is that transactions often post 1-3 days after the actual transaction date
+        # so transactions near the start of the audit data may actually lurk in the previous year's data.
+        audit_data = truncate_audit_data(audit_data, self._df)
+        audit_data.sort_values(by='Date', ascending=True, inplace=True)
 
-        # Step 2
-        rowsums = self._df.apply(safe_sum, axis=1)
+        # Step 2: combine base amt, tax, and tips
+        self._df["RowSum"] = self._df.apply(safe_sum, axis=1)
+
+        # Step 2a: combine rows with "Split" in the comments into a single row (if they are the same date and same description)
+        combine_split_rows(self)
+
+        # Don't include transfers between accounts in the audit report
+        skip_text= [
+            "DIGITAL LOAN PAYMENT FROM SHARE 09",
+            "DIGITAL LOAN PAYMENT",
+            "DIGITAL LOAN FROM SHARE 09"
+        ]
 
         # Step 3
         for idx, row in audit_data.iterrows():
+            if any(substring in row["Description"] for substring in skip_text):
+                continue
             transaction_found = False
-            hits = self._df[rowsums == row["Amount"]]
+            cleaned_desc = re.sub(r"\(Principal: (-)?\$.*, Total Payment: (-)?\$.*\)","", row["Description"])
+            if row["Amount"] < 0:
+               audit_report += f"✅ Credit on {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${abs(row['Amount']):.2f}\n"
+               continue
+            hits = self._df[np.isclose(self._df["RowSum"], float(row["Amount"]), atol=0.005)]
+    
             for hit in hits["Date"]:
                 if (row["Date"] < (hit + datetime.timedelta(days=5))) and \
                         (row["Date"] > (hit - datetime.timedelta(days=5))):
                     transaction_found = True
             if not transaction_found:
-                audit_report += f"Transaction not found for {row['Date']} - {row['Description']} - {row['Amount']}\n"
+                audit_report += f"❌ Transaction not found for {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${row['Amount']:.2f}\n"
 
         return audit_report
 

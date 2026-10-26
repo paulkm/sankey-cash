@@ -113,8 +113,11 @@ def main(argv=None):
         audit_file = input("Enter the path to the bank transactions file: ")
         audit_data = read_csv_as_df(audit_file)
         audit_data["Date"] = pd.to_datetime(audit_data["Date"])  # Normalize date format
-        audit_data["Amount"] = audit_data["Amount"].apply(lambda x: x * -1)  # Convert from negative to positive
+        # Check if the "Credit/Debit" has "Credit" and if so, invert the amount
+        if "Credit/Debit" in audit_data.columns:
+            audit_data.loc[audit_data["Credit/Debit"] == "Credit", "Amount"] *= -1
         audit_report = transactions_data.audit(audit_data, date_range)
+        save_report(audit_report, 'audit_report')
         print(audit_report)
         raise SystemExit
 

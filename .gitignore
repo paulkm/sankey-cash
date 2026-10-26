@@ -6,6 +6,13 @@ venv
 *.idea
 *.bak
 *.egg-info
+*.old
 .coverage
 coverage.xml
 htmlcov
+reports
+.devcontainer
+.localdev
+.python-version
+.vscode
+google_service_account_key.json
