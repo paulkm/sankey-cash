@@ -85,6 +85,12 @@ class Transactions:
                 same values. within the search time.
             Write out a report with any suspected missings. Note: this will be a little noisy since I break
                 transactions into multiple rows sometimes. (eg, Costco visits)
+            
+            TODO:
+            - This code is currently tightly coupled with the report format of my specific bank.
+            - If two or more sets of splits for the same payee on the same date exist, this will combine all of them into a single row.
+            - If source sheet values have not been rounded to 2 decimal places, this may cause mismatches in the audit.
+            - Add "adjustments" column and handle in RowSum calculation.
         """
         dt_today = datetime.datetime.today()
         audit_report = ""
@@ -126,12 +132,19 @@ class Transactions:
             )
 
         def truncate_audit_data(audit_data, df):
-            # Find the earliest and latest dates in the main dataframe
+            # Find the earliest and latest dates in the main dataframe.
+            # Keep a small lookback/lookahead window so month-start postings and late postings
+            # are still considered when the app is working with a narrower transaction subset.
             min_date = df["Date"].min()
             max_date = df["Date"].max()
-            # Truncate the audit data to the same date range
-            audit_data = df_date_filter(audit_data, min_date, max_date)
-            return audit_data
+            if audit_data.empty:
+                return audit_data
+
+            lookback = datetime.timedelta(days=3)
+            window_start = min_date # - lookback <- don't add early start
+            window_end = max_date + lookback
+            audit_data = audit_data[(audit_data["Date"] >= window_start) & (audit_data["Date"] <= window_end)]
+            return audit_data.reset_index(drop=True)
 
         # Step 1
         # Note: currently this codepath does not work
@@ -148,9 +161,8 @@ class Transactions:
         elif not self._app_settings.all_time:
             audit_data = df_date_filter(audit_data, self._app_settings.DEFAULT_START_DATE, dt_today)
 
-        # Ensure that the audit data is the same date range as the main dataframe
-        # Note: a known issue is that transactions often post 1-3 days after the actual transaction date
-        # so transactions near the start of the audit data may actually lurk in the previous year's data.
+        # Trim the bank data to the active transaction window when the main dataframe is a narrower subset
+        # of the bank export. This avoids false positives from older/newer bank rows outside the dataset being audited.
         audit_data = truncate_audit_data(audit_data, self._df)
         audit_data.sort_values(by='Date', ascending=True, inplace=True)
 
@@ -167,7 +179,9 @@ class Transactions:
             "DIGITAL LOAN FROM SHARE 09"
         ]
 
-        # Step 3
+        # Step 3: Iterate over bank data row by row looking for matching transactions in the main dataframe
+        matched_transaction_indices = set()
+        matched_transaction_log = {}
         for idx, row in audit_data.iterrows():
             if any(substring in row["Description"] for substring in skip_text):
                 continue
@@ -176,12 +190,34 @@ class Transactions:
             if row["Amount"] < 0:
                audit_report += f"✅ Credit on {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${abs(row['Amount']):.2f}\n"
                continue
-            hits = self._df[np.isclose(self._df["RowSum"], float(row["Amount"]), atol=0.005)]
-    
-            for hit in hits["Date"]:
-                if (row["Date"] < (hit + datetime.timedelta(days=5))) and \
-                        (row["Date"] > (hit - datetime.timedelta(days=5))):
+            candidate_hits = self._df[
+                np.isclose(self._df["RowSum"], float(row["Amount"]), atol=0.005)
+            ]
+            candidate_hits = candidate_hits[~candidate_hits.index.isin(matched_transaction_indices)]
+
+            for hit_idx, hit in candidate_hits["Date"].items():
+                # Bank descriptions are wildly inaccurate - the only way I have to try and line up a line item from the audit
+                # report with my transaction data is by comparing amounts and then looking for a match within a short timeframe (+/- 5 days).
+                # This preserves month-boundary cases where a transaction is recorded on the 1st but the bank posting
+                # actually lands a few days earlier, while still preventing a row from matching more than once.
+                # if "Costco" in cleaned_desc and row["Date"].day == 29:
+                #     import pdb; pdb.set_trace()
+
+                # Look for matches in the previous 5 days
+                if hit <= row["Date"] <= hit + datetime.timedelta(days=5):
+                    matched_transaction_indices.add(hit_idx)
+                    matched_transaction_log[hit_idx] = f"Bank transaction: {row['Description']} on {row['Date'].strftime('%m-%d-%Y')} was matched with {self._df.iloc[hit_idx]['Description']} from {self._df.iloc[hit_idx]['Date'].strftime('%m-%d-%Y')}"
                     transaction_found = True
+                    break
+
+                # If we're near the end of the month, check forward as well
+                if (row["Date"].day >= 27):
+                    if hit - datetime.timedelta(days=7) <= row["Date"] <= hit:
+                        matched_transaction_indices.add(hit_idx)
+                        matched_transaction_log[hit_idx] = f"Bank transaction: {row['Description']} on {row['Date'].strftime('%m-%d-%Y')} was matched with {self._df.iloc[hit_idx]['Description']} from {self._df.iloc[hit_idx]['Date'].strftime('%m-%d-%Y')}"
+                        transaction_found = True
+                        break
+
             if not transaction_found:
                 audit_report += f"❌ Transaction not found for {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${row['Amount']:.2f}\n"
 

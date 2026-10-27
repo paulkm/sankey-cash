@@ -34,12 +34,34 @@ class TestAudit:
 
     def test_audit_reports_missing_transaction(self, sample_transactions):
         audit_data = pd.DataFrame({
-            'Date': [pd.to_datetime('2023-06-01')],
+            'Date': [pd.to_datetime('2023-01-01')],
             'Amount': [9999],
             'Description': ['Unknown Charge']
         })
         report = sample_transactions.audit(audit_data)
         assert 'Unknown Charge' in report
+
+    def test_audit_keeps_small_lookback_for_month_start_postings(self, sample_transactions):
+        audit_data = pd.DataFrame({
+            'Date': [pd.to_datetime('2022-12-29')],
+            'Amount': [107],
+            'Description': ['Grocery Store']
+        })
+        report = sample_transactions.audit(audit_data)
+        assert report == ""
+
+    def test_audit_does_not_reuse_same_transaction_for_multiple_bank_rows(self, sample_transactions):
+        sample_transactions._df.at[0, 'Amount'] = 107.0
+        sample_transactions._df.at[0, 'Sales Tax'] = 0.0
+        sample_transactions._df.at[0, 'Tips'] = 0.0
+
+        audit_data = pd.DataFrame({
+            'Date': [pd.to_datetime('2023-01-01'), pd.to_datetime('2023-01-02')],
+            'Amount': [107, 107],
+            'Description': ['Grocery Store', 'Grocery Store']
+        })
+        report = sample_transactions.audit(audit_data)
+        assert report.count('Transaction not found') == 1
 
 
 class TestFilterTags:
