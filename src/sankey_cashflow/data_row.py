@@ -91,6 +91,13 @@ class DataRow:
             "type": float,
             "force_type": True,
             "comment": ""
+        },
+        "Adjustment": {
+            "required": False,
+            "nullable": True,
+            "type": float,
+            "force_type": True,
+            "comment": "Adjustment amount for the row"
         }
     }
 
@@ -148,6 +155,7 @@ class DataRow:
             description="",
             sales_tax=0,
             tips=0,
+            adjustment=0,
             comment="",
             tags="",
             row_type="",
@@ -167,6 +175,13 @@ class DataRow:
                 tips = float(tips)
             except ValueError:
                 tips = 0
+        if is_null(adjustment):
+            adjustment = 0
+        else:
+            try:
+                adjustment = float(adjustment)
+            except ValueError:
+                adjustment = 0
         if is_null(distribution):
             distribution = 0
         else:
@@ -194,6 +209,7 @@ class DataRow:
             amount,
             sales_tax,
             tips,
+            adjustment,
             classification], False, True)
 
     @staticmethod

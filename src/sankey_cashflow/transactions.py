@@ -91,6 +91,7 @@ class Transactions:
             - If two or more sets of splits for the same payee on the same date exist, this will combine all of them into a single row.
             - If source sheet values have not been rounded to 2 decimal places, this may cause mismatches in the audit.
             - Add "adjustments" column and handle in RowSum calculation.
+            - Display transactions that were not matched with bank data
         """
         dt_today = datetime.datetime.today()
         audit_report = ""
@@ -103,7 +104,7 @@ class Transactions:
                 if pd.isna(val) or val == "":
                     return 0
                 return round(float(val), 2)
-            return round(pd_series["Amount"] + vval(pd_series.get("Sales Tax")) + vval(pd_series.get("Tips")), 2)
+            return round(pd_series["Amount"] + vval(pd_series.get("Sales Tax")) + vval(pd_series.get("Tips")) + (vval(pd_series.get("Adjustment"))), 2)
 
         def combine_split_rows(self) -> None:
             df = self._df
@@ -188,7 +189,7 @@ class Transactions:
             transaction_found = False
             cleaned_desc = re.sub(r"\(Principal: (-)?\$.*, Total Payment: (-)?\$.*\)","", row["Description"])
             if row["Amount"] < 0:
-               audit_report += f"✅ Credit on {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${abs(row['Amount']):.2f}\n"
+               audit_report += f"💰 Credit on {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${abs(row['Amount']):.2f}\n"
                continue
             candidate_hits = self._df[
                 np.isclose(self._df["RowSum"], float(row["Amount"]), atol=0.005)
@@ -220,6 +221,13 @@ class Transactions:
 
             if not transaction_found:
                 audit_report += f"❌ Transaction not found for {row['Date'].strftime('%m-%d-%Y')} from {cleaned_desc} for ${row['Amount']:.2f}\n"
+
+        # Show transactions in transaction data that were not matched with bank data
+        # Too noisy - I would have to come up with a way to filter.
+        # Maybe create a sheet with excluded categories and tags?
+        # for idx, row in self._df.iterrows():
+        #     if idx not in matched_transaction_indices:
+        #         audit_report += f"⚠️ Unmatched transaction: {row['Date'].strftime('%m-%d-%Y')} from {row['Description']} for ${row['Amount']:.2f}\n"
 
         return audit_report
 

@@ -153,7 +153,7 @@ def normalize_chart_resolution(value: str) -> Optional[str]:
 
 
 def normalize_amounts(df_row):
-    for atype in ["Amount", "Sales Tax", "Tips"]:
+    for atype in ["Amount", "Sales Tax", "Tips", "Adjustment"]:
         val = df_row[atype]
         if is_empty(val):
             continue
